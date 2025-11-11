@@ -91,8 +91,9 @@ def register_user(name, matricula, email, password):
         return False, "E-mail já cadastrado."
     
     # Verifica se o email está na lista de permitidos
+    # O email do administrador sempre pode se registrar
     allowed_emails = get_allowed_emails()
-    if email not in allowed_emails:
+    if email != ADMIN_EMAIL and email not in allowed_emails:
         return False, "E-mail não autorizado. Entre em contato com o administrador para solicitar acesso."
     
     hashed_pw = hash_password(password)
