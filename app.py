@@ -248,6 +248,27 @@ def register_user_oauth(name, email):
             return False, "⚠️ ERRO DE CONFIGURAÇÃO: O Google Sheets não está configurado com Service Account. Consulte GOOGLE_SHEETS_SETUP.md para instruções."
         return False, f"Erro ao registrar: {error_msg}"
 
+def add_atividades_bulk(escala_nome, df_new_atividades):
+    """Adiciona múltiplas atividades ao banco de dados."""
+    if df_new_atividades.empty:
+        return False, "Nenhuma atividade para adicionar."
+    
+    # Adiciona IDs únicos e nome da escala
+    df_new_atividades['id_atividade'] = [str(uuid.uuid4()) for _ in range(len(df_new_atividades))]
+    df_new_atividades['escala_nome'] = escala_nome
+    
+    try:
+        try:
+            df_atividades = conn.read(worksheet="atividades")
+            updated_atividades = pd.concat([df_atividades, df_new_atividades], ignore_index=True)
+            conn.update(worksheet="atividades", data=updated_atividades)
+        except:
+            # Se a planilha não existir, cria com as novas atividades
+            conn.update(worksheet="atividades", data=df_new_atividades)
+        return True, f"{len(df_new_atividades)} atividade(s) adicionada(s) com sucesso!"
+    except Exception as e:
+        return False, f"Erro ao adicionar atividades: {e}"
+
 def add_atividade(escala_nome, tipo, data, horario, vagas):
     """Adiciona uma nova atividade ao banco de dados."""
     atividade_id = str(uuid.uuid4()) # Gera um ID único
@@ -270,7 +291,7 @@ def add_atividade(escala_nome, tipo, data, horario, vagas):
         st.error(f"Erro ao adicionar atividade: {e}")
         return False
 
-def get_escala_completa(escala_nome):
+def get_escala_completa(escala_nome, sort_chronologically=True):
     """Busca a escala com os nomes dos participantes."""
     try:
         df_atividades = conn.read(worksheet="atividades", ttl=5)
@@ -295,10 +316,220 @@ def get_escala_completa(escala_nome):
         df_final = df_final[['tipo', 'data', 'horario', 'vagas', 'Participantes']]
         df_final.columns = ['Tipo', 'Data', 'Horário', 'Vagas', 'Participantes']
         
+        # Ordena cronologicamente se solicitado
+        if sort_chronologically:
+            df_final['data_sort'] = pd.to_datetime(df_final['Data'])
+            # Extrai o horário inicial para ordenação (ex: "07:00-19:00" -> "07:00")
+            df_final['horario_sort'] = df_final['Horário'].str.split('-').str[0].str.strip()
+            df_final = df_final.sort_values(['data_sort', 'horario_sort'])
+            df_final = df_final.drop(['data_sort', 'horario_sort'], axis=1)
+        
         return df_final
     except Exception as e:
         st.error(f"Erro ao buscar escala: {e}")
         return pd.DataFrame(columns=['Tipo', 'Data', 'Horário', 'Vagas', 'Participantes'])
+
+
+def get_current_round(escala_nome):
+    """Busca a rodada atual da escala."""
+    try:
+        df_rounds = conn.read(worksheet="rodadas", ttl=5)
+        rounds_escala = df_rounds[df_rounds['escala_nome'] == escala_nome]
+        if rounds_escala.empty:
+            return None
+        # Retorna a rodada com maior número (rodada atual)
+        return rounds_escala.loc[rounds_escala['numero_rodada'].idxmax()]
+    except:
+        return None
+
+def create_new_round(escala_nome):
+    """Cria uma nova rodada com ordem aleatória dos participantes."""
+    try:
+        # Busca todos os usuários (exceto admin)
+        df_users = conn.read(worksheet="usuarios", ttl=5)
+        participants = df_users[df_users['email'] != ADMIN_EMAIL]['email'].tolist()
+        
+        if not participants:
+            return False, "Nenhum participante cadastrado."
+        
+        # Embaralha a ordem dos participantes
+        import random
+        random.shuffle(participants)
+        
+        # Determina o número da nova rodada
+        current_round = get_current_round(escala_nome)
+        new_round_number = 1 if current_round is None else int(current_round['numero_rodada']) + 1
+        
+        # Cria registros para a nova rodada
+        round_data = []
+        for position, email in enumerate(participants, start=1):
+            round_data.append({
+                "escala_nome": escala_nome,
+                "numero_rodada": new_round_number,
+                "posicao": position,
+                "email_participante": email,
+                "ja_escolheu": False
+            })
+        
+        new_round_df = pd.DataFrame(round_data)
+        
+        # Salva a nova rodada
+        try:
+            df_rounds = conn.read(worksheet="rodadas")
+            updated_rounds = pd.concat([df_rounds, new_round_df], ignore_index=True)
+            conn.update(worksheet="rodadas", data=updated_rounds)
+        except:
+            # Se a planilha não existir, cria com a nova rodada
+            conn.update(worksheet="rodadas", data=new_round_df)
+        
+        return True, f"Rodada {new_round_number} criada com {len(participants)} participantes!"
+    except Exception as e:
+        return False, f"Erro ao criar rodada: {e}"
+
+def get_round_order(escala_nome):
+    """Retorna a ordem de escolha da rodada atual."""
+    try:
+        df_rounds = conn.read(worksheet="rodadas", ttl=5)
+        current_round = get_current_round(escala_nome)
+        
+        if current_round is None:
+            return pd.DataFrame(columns=['Posição', 'Participante', 'Email', 'Status'])
+        
+        round_number = current_round['numero_rodada']
+        round_data = df_rounds[
+            (df_rounds['escala_nome'] == escala_nome) & 
+            (df_rounds['numero_rodada'] == round_number)
+        ].sort_values('posicao')
+        
+        # Busca os nomes dos participantes
+        df_users = conn.read(worksheet="usuarios", ttl=5)
+        round_data = round_data.merge(
+            df_users[['email', 'nome']], 
+            left_on='email_participante', 
+            right_on='email', 
+            how='left'
+        )
+        
+        round_data['Status'] = round_data['ja_escolheu'].apply(lambda x: '✅ Escolheu' if x else '⏳ Aguardando')
+        
+        result = round_data[['posicao', 'nome', 'email_participante', 'Status']]
+        result.columns = ['Posição', 'Participante', 'Email', 'Status']
+        
+        return result
+    except Exception as e:
+        st.error(f"Erro ao buscar ordem da rodada: {e}")
+        return pd.DataFrame(columns=['Posição', 'Participante', 'Email', 'Status'])
+
+def get_current_turn(escala_nome):
+    """Retorna o email do participante cuja vez é de escolher."""
+    try:
+        df_rounds = conn.read(worksheet="rodadas", ttl=5)
+        current_round = get_current_round(escala_nome)
+        
+        if current_round is None:
+            return None
+        
+        round_number = current_round['numero_rodada']
+        round_data = df_rounds[
+            (df_rounds['escala_nome'] == escala_nome) & 
+            (df_rounds['numero_rodada'] == round_number) &
+            (df_rounds['ja_escolheu'] == False)
+        ].sort_values('posicao')
+        
+        if round_data.empty:
+            return None  # Todos já escolheram
+        
+        return round_data.iloc[0]['email_participante']
+    except:
+        return None
+
+def mark_choice_made(escala_nome, email):
+    """Marca que um participante já fez sua escolha na rodada atual."""
+    try:
+        df_rounds = conn.read(worksheet="rodadas")
+        current_round = get_current_round(escala_nome)
+        
+        if current_round is None:
+            return False
+        
+        round_number = current_round['numero_rodada']
+        
+        # Atualiza o status de ja_escolheu para True
+        df_rounds.loc[
+            (df_rounds['escala_nome'] == escala_nome) & 
+            (df_rounds['numero_rodada'] == round_number) &
+            (df_rounds['email_participante'] == email),
+            'ja_escolheu'
+        ] = True
+        
+        conn.update(worksheet="rodadas", data=df_rounds)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao marcar escolha: {e}")
+        return False
+
+def get_available_activities(escala_nome):
+    """Retorna atividades disponíveis (com vagas) ordenadas cronologicamente."""
+    try:
+        df_atividades = conn.read(worksheet="atividades", ttl=5)
+        
+        # Filtra pela escala
+        atividades_escala = df_atividades[df_atividades['escala_nome'] == escala_nome].copy()
+        
+        if atividades_escala.empty:
+            return pd.DataFrame()
+        
+        # Conta quantas escolhas já foram feitas para cada atividade
+        try:
+            df_escolhas = conn.read(worksheet="escolhas", ttl=5)
+            escolhas_count = df_escolhas.groupby('id_atividade').size().reset_index(name='ocupadas')
+            atividades_escala = atividades_escala.merge(escolhas_count, on='id_atividade', how='left')
+            atividades_escala['ocupadas'] = atividades_escala['ocupadas'].fillna(0).astype(int)
+        except:
+            atividades_escala['ocupadas'] = 0
+        
+        # Calcula vagas disponíveis
+        atividades_escala['vagas_disponiveis'] = atividades_escala['vagas'].astype(int) - atividades_escala['ocupadas']
+        
+        # Filtra apenas atividades com vagas disponíveis
+        atividades_disponiveis = atividades_escala[atividades_escala['vagas_disponiveis'] > 0].copy()
+        
+        # Ordena cronologicamente
+        atividades_disponiveis['data_sort'] = pd.to_datetime(atividades_disponiveis['data'])
+        atividades_disponiveis['horario_sort'] = atividades_disponiveis['horario'].str.split('-').str[0].str.strip()
+        atividades_disponiveis = atividades_disponiveis.sort_values(['data_sort', 'horario_sort'])
+        
+        return atividades_disponiveis[['id_atividade', 'tipo', 'data', 'horario', 'vagas_disponiveis']]
+    except Exception as e:
+        st.error(f"Erro ao buscar atividades disponíveis: {e}")
+        return pd.DataFrame()
+
+def make_choice(escala_nome, email_participante, nome_participante, id_atividade):
+    """Registra a escolha de um participante."""
+    try:
+        # Cria o registro da escolha
+        new_choice = pd.DataFrame([{
+            "escala_nome": escala_nome,
+            "id_atividade": id_atividade,
+            "email_participante": email_participante,
+            "nome_participante": nome_participante
+        }])
+        
+        # Salva a escolha
+        try:
+            df_escolhas = conn.read(worksheet="escolhas")
+            updated_escolhas = pd.concat([df_escolhas, new_choice], ignore_index=True)
+            conn.update(worksheet="escolhas", data=updated_escolhas)
+        except:
+            # Se a planilha não existir, cria com a primeira escolha
+            conn.update(worksheet="escolhas", data=new_choice)
+        
+        # Marca que o participante já escolheu nesta rodada
+        mark_choice_made(escala_nome, email_participante)
+        
+        return True, "Escolha registrada com sucesso!"
+    except Exception as e:
+        return False, f"Erro ao registrar escolha: {e}"
 
 
 # --- Funções de Exportação (Mantidas como estavam) ---
@@ -472,21 +703,92 @@ else:
             st.header("Gerenciador de Escalas 🗓️")
             escala_nome = st.text_input("Digite o nome da escala (ex: 'Dezembro/2025'):")
 
-            with st.form("form_add_atividade", clear_on_submit=True):
-                st.subheader("Adicionar Nova Atividade")
-                tipo = st.selectbox("Tipo de Atividade", ["Plantão", "Ambulatório", "Enfermaria"])
-                data = st.date_input("Data")
-                horario = st.text_input("Horário (ex: 07:00-19:00)")
-                vagas = st.number_input("Número de Vagas", min_value=1, value=1)
-                submitted = st.form_submit_button("Adicionar Atividade")
-
-                if submitted and escala_nome:
-                    if add_atividade(escala_nome, tipo, data, horario, vagas):
-                        st.success(f"Atividade '{tipo}' em {data} adicionada à escala '{escala_nome}'!")
-                    else:
-                        st.error("Falha ao adicionar atividade.")
-                elif submitted:
-                    st.warning("Por favor, defina um nome para a escala antes de adicionar atividades.")
+            # Formulário de adição de atividades via planilha
+            if escala_nome:
+                st.subheader("Adicionar Atividades")
+                st.info("💡 Edite a tabela abaixo para adicionar múltiplas atividades de uma vez. As atividades serão ordenadas cronologicamente automaticamente.")
+                
+                # Inicializa a planilha de edição se não existir
+                if 'df_new_activities' not in st.session_state:
+                    st.session_state.df_new_activities = pd.DataFrame({
+                        'Tipo': ['Plantão', 'Ambulatório', 'Enfermaria'],
+                        'Data': ['2025-12-01', '2025-12-02', '2025-12-03'],
+                        'Horário': ['07:00-19:00', '08:00-12:00', '13:00-18:00'],
+                        'Vagas': [2, 1, 1]
+                    })
+                
+                # Editor de dados
+                edited_df = st.data_editor(
+                    st.session_state.df_new_activities,
+                    num_rows="dynamic",
+                    column_config={
+                        "Tipo": st.column_config.SelectboxColumn(
+                            "Tipo de Atividade",
+                            options=["Plantão", "Ambulatório", "Enfermaria"],
+                            required=True
+                        ),
+                        "Data": st.column_config.TextColumn(
+                            "Data (AAAA-MM-DD)",
+                            required=True
+                        ),
+                        "Horário": st.column_config.TextColumn(
+                            "Horário (ex: 07:00-19:00)",
+                            required=True
+                        ),
+                        "Vagas": st.column_config.NumberColumn(
+                            "Número de Vagas",
+                            min_value=1,
+                            required=True
+                        )
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("💾 Salvar Atividades", type="primary"):
+                        # Valida e prepara os dados
+                        if not edited_df.empty:
+                            # Remove linhas vazias
+                            edited_df = edited_df.dropna(how='all')
+                            
+                            if not edited_df.empty:
+                                # Converte para o formato esperado
+                                df_to_save = edited_df.copy()
+                                df_to_save.columns = ['tipo', 'data', 'horario', 'vagas']
+                                
+                                # Salva as atividades
+                                success, message = add_atividades_bulk(escala_nome, df_to_save)
+                                if success:
+                                    st.success(message)
+                                    # Limpa a planilha de edição
+                                    st.session_state.df_new_activities = pd.DataFrame({
+                                        'Tipo': [''],
+                                        'Data': [''],
+                                        'Horário': [''],
+                                        'Vagas': [1]
+                                    })
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                            else:
+                                st.warning("Nenhuma atividade para salvar.")
+                        else:
+                            st.warning("Nenhuma atividade para salvar.")
+                
+                with col2:
+                    if st.button("🗑️ Limpar Planilha"):
+                        st.session_state.df_new_activities = pd.DataFrame({
+                            'Tipo': [''],
+                            'Data': [''],
+                            'Horário': [''],
+                            'Vagas': [1]
+                        })
+                        st.rerun()
+                
+                st.divider()
             
             st.header(f"Escala Atual: {escala_nome or 'Nenhuma selecionada'}")
             if escala_nome:
@@ -511,6 +813,40 @@ else:
                         file_name=f"escala_{escala_nome.replace('/', '_')}.xlsx",
                         mime="application/vnd.ms-excel"
                     )
+                
+                st.divider()
+                
+                # Gerenciamento de rodadas
+                st.subheader("Gerenciar Rodadas de Escolha")
+                
+                current_round = get_current_round(escala_nome)
+                if current_round is not None:
+                    st.info(f"📍 Rodada atual: **{int(current_round['numero_rodada'])}**")
+                    
+                    # Mostra a ordem da rodada
+                    df_order = get_round_order(escala_nome)
+                    st.dataframe(df_order, use_container_width=True)
+                    
+                    # Verifica se todos já escolheram
+                    all_chosen = (df_order['Status'] == '✅ Escolheu').all()
+                    if all_chosen:
+                        st.success("✅ Todos os participantes já escolheram nesta rodada!")
+                        if st.button("🔄 Iniciar Nova Rodada"):
+                            success, message = create_new_round(escala_nome)
+                            if success:
+                                st.success(message)
+                                st.rerun()
+                            else:
+                                st.error(message)
+                else:
+                    st.warning("Nenhuma rodada iniciada para esta escala.")
+                    if st.button("🎲 Iniciar Primeira Rodada"):
+                        success, message = create_new_round(escala_nome)
+                        if success:
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
 
         elif menu_admin == "Gerenciar Emails Permitidos":
             st.header("Gerenciar Emails Permitidos para Cadastro 📧")
@@ -568,12 +904,145 @@ else:
 
         if menu_user == "Escolher Horário":
             st.header("Rodada de Escolha de Horários 🕒")
-            st.info("Funcionalidade de sorteio e escolha em rodadas em desenvolvimento.")
-            # ... (Lógica da escolha) ...
+            
+            # Seletor de escala
+            escala_nome = st.text_input("Digite o nome da escala (ex: 'Dezembro/2025'):")
+            
+            if escala_nome:
+                # Verifica se existe uma rodada ativa
+                current_round = get_current_round(escala_nome)
+                
+                if current_round is None:
+                    st.warning("⏳ Nenhuma rodada foi iniciada ainda para esta escala. Aguarde o administrador iniciar a primeira rodada.")
+                else:
+                    round_number = int(current_round['numero_rodada'])
+                    st.info(f"📍 Rodada atual: **{round_number}**")
+                    
+                    # Mostra a ordem da rodada
+                    st.subheader("Ordem de Escolha")
+                    df_order = get_round_order(escala_nome)
+                    st.dataframe(df_order, use_container_width=True)
+                    
+                    # Verifica de quem é a vez
+                    current_turn = get_current_turn(escala_nome)
+                    user_email = st.session_state['user_email']
+                    
+                    if current_turn is None:
+                        st.success("✅ Todos os participantes já escolheram nesta rodada! Aguarde o administrador iniciar a próxima rodada.")
+                    elif current_turn == user_email:
+                        st.success("🎯 É a sua vez de escolher!")
+                        
+                        # Mostra atividades disponíveis
+                        st.subheader("Atividades Disponíveis (Ordenadas Cronologicamente)")
+                        df_available = get_available_activities(escala_nome)
+                        
+                        if df_available.empty:
+                            st.warning("Nenhuma atividade disponível no momento.")
+                        else:
+                            # Prepara dados para exibição
+                            df_display = df_available.copy()
+                            df_display.columns = ['ID', 'Tipo', 'Data', 'Horário', 'Vagas Disponíveis']
+                            df_display = df_display[['Tipo', 'Data', 'Horário', 'Vagas Disponíveis']]
+                            
+                            st.dataframe(df_display, use_container_width=True)
+                            
+                            # Formulário de escolha
+                            with st.form("form_escolha"):
+                                st.write("**Selecione uma atividade:**")
+                                
+                                # Cria opções para o selectbox
+                                options = []
+                                for idx, row in df_available.iterrows():
+                                    option_text = f"{row['tipo']} - {row['data']} - {row['horario']} ({int(row['vagas_disponiveis'])} vaga(s))"
+                                    options.append((option_text, row['id_atividade']))
+                                
+                                selected = st.selectbox(
+                                    "Escolha:",
+                                    options=range(len(options)),
+                                    format_func=lambda x: options[x][0]
+                                )
+                                
+                                submit = st.form_submit_button("✅ Confirmar Escolha", type="primary")
+                                
+                                if submit:
+                                    selected_id = options[selected][1]
+                                    success, message = make_choice(
+                                        escala_nome, 
+                                        user_email, 
+                                        st.session_state['user_name'],
+                                        selected_id
+                                    )
+                                    
+                                    if success:
+                                        st.success(message)
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.error(message)
+                    else:
+                        # Mostra quem está escolhendo no momento
+                        try:
+                            df_users = conn.read(worksheet="usuarios", ttl=5)
+                            current_user = df_users[df_users['email'] == current_turn]
+                            if not current_user.empty:
+                                current_name = current_user.iloc[0]['nome']
+                                st.info(f"⏳ Aguarde sua vez. Escolhendo agora: **{current_name}**")
+                            else:
+                                st.info(f"⏳ Aguarde sua vez.")
+                        except:
+                            st.info(f"⏳ Aguarde sua vez.")
+                        
+                        # Mostra atividades disponíveis (apenas visualização)
+                        with st.expander("👁️ Ver Atividades Disponíveis"):
+                            df_available = get_available_activities(escala_nome)
+                            if not df_available.empty:
+                                df_display = df_available.copy()
+                                df_display.columns = ['ID', 'Tipo', 'Data', 'Horário', 'Vagas Disponíveis']
+                                df_display = df_display[['Tipo', 'Data', 'Horário', 'Vagas Disponíveis']]
+                                st.dataframe(df_display, use_container_width=True)
 
         elif menu_user == "Minha Escala":
             st.header("Minha Escala Pessoal")
-            st.info("Funcionalidade em desenvolvimento.")
+            
+            escala_nome = st.text_input("Digite o nome da escala (ex: 'Dezembro/2025'):")
+            
+            if escala_nome:
+                try:
+                    df_escolhas = conn.read(worksheet="escolhas", ttl=5)
+                    df_atividades = conn.read(worksheet="atividades", ttl=5)
+                    
+                    # Filtra escolhas do usuário
+                    user_email = st.session_state['user_email']
+                    minhas_escolhas = df_escolhas[
+                        (df_escolhas['email_participante'] == user_email) &
+                        (df_escolhas['escala_nome'] == escala_nome)
+                    ]
+                    
+                    if minhas_escolhas.empty:
+                        st.info("Você ainda não escolheu nenhuma atividade nesta escala.")
+                    else:
+                        # Junta com informações das atividades
+                        minhas_atividades = minhas_escolhas.merge(
+                            df_atividades,
+                            on='id_atividade',
+                            how='left'
+                        )
+                        
+                        # Prepara dados para exibição
+                        df_display = minhas_atividades[['tipo', 'data', 'horario']].copy()
+                        df_display.columns = ['Tipo', 'Data', 'Horário']
+                        
+                        # Ordena cronologicamente
+                        df_display['data_sort'] = pd.to_datetime(df_display['Data'])
+                        df_display['horario_sort'] = df_display['Horário'].str.split('-').str[0].str.strip()
+                        df_display = df_display.sort_values(['data_sort', 'horario_sort'])
+                        df_display = df_display[['Tipo', 'Data', 'Horário']]
+                        
+                        st.dataframe(df_display, use_container_width=True)
+                        
+                        st.success(f"✅ Total de atividades escolhidas: {len(df_display)}")
+                except Exception as e:
+                    st.error(f"Erro ao carregar suas escolhas: {e}")
 
         elif menu_user == "Trocar Horário":
             st.header("Solicitar Troca de Horários 🔄")
