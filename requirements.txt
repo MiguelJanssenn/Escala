@@ -1,8 +1,8 @@
+# requirements.txt
+
 streamlit
 streamlit-authenticator
 pandas
-pyyaml
-gspread
-google-auth
 openpyxl
 fpdf2
+pyyaml
