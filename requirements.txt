@@ -2,4 +2,7 @@ streamlit
 streamlit-authenticator
 pandas
 pyyaml
-streamlit-gsheets-connector
+gspread
+google-auth
+openpyxl
+fpdf2
