@@ -1,0 +1,85 @@
+import streamlit as st
+import streamlit_authenticator as stauth
+import yaml
+from yaml.loader import SafeLoader
+import pandas as pd
+import os
+
+# --- Configuração da Página ---
+st.set_page_config(page_title="Gerenciador de Escalas", layout="wide")
+
+# --- Carregar Configurações de Autenticação ---
+with open('config.yaml') as file:
+    config = yaml.load(file, Loader=SafeLoader)
+
+authenticator = stauth.Authenticate(
+    config['credentials'],
+    config['cookie']['name'],
+    config['cookie']['key'],
+    config['cookie']['expiry_days'],
+    config['preauthorized']
+)
+
+# --- Tela de Login ---
+st.title("Plataforma de Escolha de Escalas de Internato")
+name, authentication_status, username = authenticator.login('Login', 'main')
+
+# --- Lógica Pós-Login ---
+if authentication_status:
+    authenticator.logout('Logout', 'main', key='logout_button')
+    st.write(f'Bem-vindo(a) *{name}*')
+
+    # --- Se o usuário for ADMIN ---
+    if username == 'admin':
+        st.header("Painel do Administrador")
+
+        # --- Formulário para Adicionar Atividades ---
+        with st.form("form_add_activity", clear_on_submit=True):
+            st.subheader("Cadastrar Nova Atividade")
+            tipo_atividade = st.selectbox("Tipo de Atividade", ["Plantão", "Ambulatório", "Enfermaria"])
+            data_atividade = st.date_input("Data da Atividade")
+            horario_atividade = st.time_input("Horário de Início")
+            vagas = st.number_input("Número de Vagas", min_value=1, step=1)
+            
+            submitted = st.form_submit_button("Cadastrar Atividade")
+
+            if submitted:
+                # Carregar ou criar o arquivo de atividades
+                atividades_file = 'atividades.csv'
+                if os.path.exists(atividades_file):
+                    df_atividades_existente = pd.read_csv(atividades_file)
+                else:
+                    df_atividades_existente = pd.DataFrame(columns=['Tipo', 'Data', 'Horario', 'Vagas'])
+
+                # Criar nova linha para a atividade
+                nova_atividade = pd.DataFrame([{
+                    'Tipo': tipo_atividade,
+                    'Data': data_atividade.strftime('%Y-%m-%d'),
+                    'Horario': horario_atividade.strftime('%H:%M'),
+                    'Vagas': vagas
+                }])
+
+                # Adicionar e salvar
+                df_atividades_atualizado = pd.concat([df_atividades_existente, nova_atividade], ignore_index=True)
+                df_atividades_atualizado.to_csv(atividades_file, index=False)
+                st.success("Atividade cadastrada com sucesso!")
+
+        # --- Visualização das Atividades Cadastradas ---
+        st.subheader("Atividades Cadastradas")
+        atividades_file = 'atividades.csv'
+        if os.path.exists(atividades_file):
+            df_atividades = pd.read_csv(atividades_file)
+            st.dataframe(df_atividades, use_container_width=True)
+        else:
+            st.info("Nenhuma atividade cadastrada ainda.")
+
+    # --- Se for um usuário comum ---
+    else:
+        st.header("Minha Escala")
+        st.write("Aqui você poderá visualizar suas atividades e fazer suas escolhas.")
+        # (Futuras funcionalidades para o usuário virão aqui)
+
+elif authentication_status is False:
+    st.error('Nome de usuário ou senha incorretos')
+elif authentication_status is None:
+    st.warning('Por favor, insira seu nome de usuário e senha')
