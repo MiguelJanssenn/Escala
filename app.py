@@ -28,7 +28,7 @@ authenticator = stauth.Authenticate(
 
 st.title("Plataforma de Organização de Escalas 🩺")
 
-name, authentication_status, username = authenticator.login('Login', 'main')
+name, authentication_status, username = authenticator.login()
 
 # --- Funções de Utilidade ---
 def dataframe_to_pdf(df):
