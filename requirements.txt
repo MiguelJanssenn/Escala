@@ -2,5 +2,5 @@ streamlit
 pandas
 openpyxl
 fpdf2
-streamlit-gsheets-connection
+st-gsheets-connection
 bcrypt
