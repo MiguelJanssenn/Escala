@@ -61,9 +61,18 @@ ADMIN_EMAIL = "seu-email@exemplo.com"  # Altere aqui
 
 ## Funcionalidades
 
-- **Administrador**: Pode gerenciar escalas, configurar regras e controlar quem pode se cadastrar
-- **Participantes**: Podem escolher horários, ver suas escalas e solicitar trocas de horários
+- **Administrador**: 
+  - Gerenciar escalas com interface de planilha para adicionar múltiplas atividades
+  - Iniciar rodadas de escolha com ordem aleatória
+  - Configurar regras e controlar quem pode se cadastrar
+  - Visualizar status das rodadas em tempo real
+- **Participantes**: 
+  - Escolher horários em sistema de rodadas com turnos
+  - Ver atividades disponíveis em ordem cronológica
+  - Visualizar suas escalas pessoais ordenadas por data e hora
+  - Solicitar trocas de horários (em desenvolvimento)
 - **Login com Google (Opcional)**: Permite login simplificado usando contas Google
+- **Sistema de Rodadas**: Escolha justa com ordem aleatória em cada rodada
 
 ## Métodos de Login
 
