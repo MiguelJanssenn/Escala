@@ -131,7 +131,8 @@ def add_allowed_email(email):
         # Lê a planilha atual e adiciona o novo email
         try:
             df_emails = conn.read(worksheet="emails_permitidos")
-            conn.update(worksheet="emails_permitidos", data=new_email_data, offset_rows=len(df_emails))
+            df_combined = pd.concat([df_emails, new_email_data], ignore_index=True)
+            conn.update(worksheet="emails_permitidos", data=df_combined)
         except:
             # Se a planilha não existir, cria com o primeiro email
             conn.update(worksheet="emails_permitidos", data=new_email_data)
@@ -197,7 +198,8 @@ def register_user(name, matricula, email, password):
         # Lê a planilha de usuários para encontrar a próxima linha vazia
         try:
             df_users = conn.read(worksheet="usuarios")
-            conn.update(worksheet="usuarios", data=new_user_data, offset_rows=len(df_users))
+            df_combined = pd.concat([df_users, new_user_data], ignore_index=True)
+            conn.update(worksheet="usuarios", data=df_combined)
         except:
             # Se a planilha não existir, cria com o primeiro usuário
             conn.update(worksheet="usuarios", data=new_user_data)
@@ -231,7 +233,8 @@ def register_user_oauth(name, email):
         # Lê a planilha de usuários para encontrar a próxima linha vazia
         try:
             df_users = conn.read(worksheet="usuarios")
-            conn.update(worksheet="usuarios", data=new_user_data, offset_rows=len(df_users))
+            df_combined = pd.concat([df_users, new_user_data], ignore_index=True)
+            conn.update(worksheet="usuarios", data=df_combined)
         except:
             # Se a planilha não existir, cria com o primeiro usuário
             conn.update(worksheet="usuarios", data=new_user_data)
@@ -256,7 +259,8 @@ def add_atividade(escala_nome, tipo, data, horario, vagas):
     
     try:
         df_atividades = conn.read(worksheet="atividades")
-        conn.update(worksheet="atividades", data=new_atividade, offset_rows=len(df_atividades))
+        df_combined = pd.concat([df_atividades, new_atividade], ignore_index=True)
+        conn.update(worksheet="atividades", data=df_combined)
         return True
     except Exception as e:
         st.error(f"Erro ao adicionar atividade: {e}")
