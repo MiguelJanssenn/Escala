@@ -20,6 +20,7 @@
    - Email: **admin@email.com**
    - Senha: (a senha que você definiu)
    - Clique em "Entrar"
+   - **OU** use "Login com Google" (se configurado)
 
 ### Credenciais padrão do administrador:
 
@@ -33,7 +34,7 @@
 
 ### Para alterar o email do administrador:
 
-Se desejar usar outro email como administrador, edite o arquivo `app.py` na linha 13:
+Se desejar usar outro email como administrador, edite o arquivo `app.py` na linha 20:
 
 ```python
 ADMIN_EMAIL = "seu-email@exemplo.com"  # Altere aqui
@@ -43,7 +44,21 @@ ADMIN_EMAIL = "seu-email@exemplo.com"  # Altere aqui
 
 - **Administrador**: Pode gerenciar escalas, configurar regras e controlar quem pode se cadastrar
 - **Participantes**: Podem escolher horários, ver suas escalas e solicitar trocas de horários
+- **Login com Google (Opcional)**: Permite login simplificado usando contas Google
+
+## Métodos de Login
+
+### Login Tradicional (Email/Senha)
+- Usuários se registram com email, senha e matrícula
+- Login usando email e senha cadastrados
+
+### Login com Google OAuth (Opcional)
+- **Simplicidade**: Login com um clique usando conta Google
+- **Segurança**: Sem necessidade de criar senhas adicionais
+- **Auto-registro**: Usuários autorizados são registrados automaticamente
+- **Como habilitar**: Consulte [GOOGLE_OAUTH_SETUP.md](GOOGLE_OAUTH_SETUP.md)
 
 ## Documentação
 
-Para mais detalhes sobre a funcionalidade de whitelist de emails, veja [WHITELIST_FEATURE.md](WHITELIST_FEATURE.md)
+- **Whitelist de Emails**: [WHITELIST_FEATURE.md](WHITELIST_FEATURE.md)
+- **Configuração do Google OAuth**: [GOOGLE_OAUTH_SETUP.md](GOOGLE_OAUTH_SETUP.md)
