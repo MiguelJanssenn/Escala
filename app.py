@@ -1,179 +1,156 @@
+# app.py
+
 import streamlit as st
-import json
-import gspread
-import pandas as pd
-from datetime import datetime
 import streamlit_authenticator as stauth
 import yaml
 from yaml.loader import SafeLoader
+import pandas as pd
+from fpdf import FPDF
+import io
 
-st.set_page_config(page_title="Gerenciador de Escalas", layout="wide")
+# Importar funções do banco de dados
+import database as db
 
-# --- Conexão ao Google Sheets via st.secrets ---
-# Espera-se que .streamlit/secrets.toml contenha:
-# gspread_service_account = '''{ ... }'''
-# SHEET_ID = "1AbCdE..."
-creds_json_str = st.secrets.get("gspread_service_account", None)
-sheet_id = st.secrets.get("SHEET_ID", None)
+# --- Configuração da Página ---
+st.set_page_config(page_title="Plataforma de Escalas", layout="wide")
 
-if creds_json_str is None or sheet_id is None:
-    st.error("Credenciais do Google Sheets ou SHEET_ID não encontradas em st.secrets. Verifique .streamlit/secrets.toml.")
-    st.stop()
+# --- Autenticação ---
+with open('config.yaml') as file:
+    config = yaml.load(file, Loader=SafeLoader)
 
-creds_dict = json.loads(creds_json_str)
-gc = gspread.service_account_from_dict(creds_dict)
-sh = gc.open_by_key(sheet_id)
+authenticator = stauth.Authenticate(
+    config['credentials'],
+    config['cookie']['name'],
+    config['cookie']['key'],
+    config['cookie']['expiry_days'],
+    config['preauthorized']
+)
 
-# Helper: ler aba como DataFrame (preserva cabeçalho)
-def read_sheet_df(sheet_name):
-    try:
-        ws = sh.worksheet(sheet_name)
-        data = ws.get_all_records()
-        return pd.DataFrame(data)
-    except Exception as e:
-        # Se a aba não existir ou estiver vazia, retorna DataFrame vazio com colunas
-        return pd.DataFrame()
+st.title("Plataforma de Organização de Escalas 🩺")
 
-# Helper: append linha (dict) para uma aba
-def append_row(sheet_name, row_dict):
-    ws = sh.worksheet(sheet_name)
-    # Garantir que cabeçalhos existam
-    headers = ws.row_values(1)
-    if not headers:
-        # cria cabeçalho baseado nas chaves
-        ws.append_row(list(row_dict.keys()))
-    # append valores na ordem dos headers (preenchendo campos faltantes)
-    headers = ws.row_values(1)
-    values = [row_dict.get(h, "") for h in headers]
-    ws.append_row(values)
+name, authentication_status, username = authenticator.login('Login', 'main')
 
-# --- Autenticação (streamlit-authenticator) ---
-# Opcional: ler config.yaml local para credenciais de login do app
-# (Você pode continuar usando config.yaml com users ou migrar usuarios para Google Sheet)
-try:
-    with open('config.yaml') as file:
-        config = yaml.load(file, Loader=SafeLoader)
-except FileNotFoundError:
-    config = None
+# --- Funções de Utilidade ---
+def dataframe_to_pdf(df):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    
+    # Cabeçalhos
+    for col in df.columns:
+        pdf.cell(40, 10, col, 1, 0, 'C')
+    pdf.ln()
+    
+    # Dados
+    for index, row in df.iterrows():
+        for item in row:
+            pdf.cell(40, 10, str(item), 1, 0, 'L')
+        pdf.ln()
+    
+    return pdf.output(dest='S').encode('latin-1')
 
-if config:
-    authenticator = stauth.Authenticate(
-        config['credentials'],
-        config.get('cookie', {}).get('name', 'cookie-name'),
-        config.get('cookie', {}).get('key', 'some-key'),
-        config.get('cookie', {}).get('expiry_days', 30),
-        config.get('preauthorized', {})
-    )
-    name, authentication_status, username = authenticator.login('Login', 'main')
-else:
-    st.info("Arquivo config.yaml não encontrado. A aplicação continuará sem login de usuários (somente testes).")
-    name = "Visitante"
-    authentication_status = True
-    username = "guest"
+def dataframe_to_excel(df):
+    output = io.BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    df.to_excel(writer, index=False, sheet_name='Escala')
+    writer.close()
+    processed_data = output.getvalue()
+    return processed_data
 
+# --- Lógica da Aplicação ---
 if authentication_status:
-    if config:
-        authenticator.logout('Logout', 'main', key='logout')
-    st.write(f"Bem-vindo(a), {name}!")
+    st.sidebar.write(f'Bem-vindo(a) *{name}*')
+    authenticator.logout('Logout', 'sidebar')
 
-    # Página admin (simples check pelo username 'admin' — customize conforme seu sistema)
-    is_admin = (username == 'admin')
+    # --- Visão do Administrador ---
+    if username == 'admin':
+        st.sidebar.title("Painel do Administrador")
+        menu_admin = st.sidebar.radio("Selecione uma opção:", ["Criar/Ver Escala", "Configurar Regras", "Histórico"])
 
-    if is_admin:
-        st.header("Painel do Administrador")
+        if menu_admin == "Criar/Ver Escala":
+            st.header("Gerenciador de Escalas 🗓️")
+            escala_nome = st.text_input("Digite o nome da nova escala (ex: 'Dezembro/2025'):")
 
-        # Mostrar atividades atuais
-        st.subheader("Atividades cadastradas")
-        df_atividades = read_sheet_df("atividades")
-        if df_atividades.empty:
-            st.info("Nenhuma atividade cadastrada.")
-        else:
-            st.dataframe(df_atividades)
+            with st.form("form_add_atividade", clear_on_submit=True):
+                st.subheader("Adicionar Nova Atividade")
+                tipo = st.selectbox("Tipo de Atividade", ["Plantão", "Ambulatório", "Enfermaria"])
+                data = st.date_input("Data")
+                horario = st.text_input("Horário (ex: 07:00-19:00)")
+                vagas = st.number_input("Número de Vagas", min_value=1, value=1)
+                submitted = st.form_submit_button("Adicionar Atividade")
 
-        # Form para cadastrar atividade (append à aba 'atividades')
-        with st.form("form_add_activity", clear_on_submit=True):
-            tipo = st.selectbox("Tipo de Atividade", ["Plantão", "Ambulatório", "Enfermaria"])
-            data_atividade = st.date_input("Data")
-            horario = st.time_input("Horário")
-            vagas = st.number_input("Vagas", min_value=1, step=1)
-            submitted = st.form_submit_button("Cadastrar")
-            if submitted:
-                row = {
-                    "Tipo": tipo,
-                    "Data": data_atividade.strftime("%Y-%m-%d"),
-                    "Horario": horario.strftime("%H:%M"),
-                    "Vagas": int(vagas)
-                }
-                # Se a aba não existir, cria-la com headers
-                try:
-                    append_row("atividades", row)
-                    st.success("Atividade cadastrada e enviada ao Google Sheets.")
-                except Exception as e:
-                    st.error(f"Erro ao cadastrar atividade: {e}")
+                if submitted and escala_nome:
+                    db.adicionar_atividade(escala_nome, tipo, str(data), horario, vagas)
+                    st.success(f"Atividade '{tipo}' em {data} adicionada à escala '{escala_nome}'!")
+                elif submitted:
+                    st.warning("Por favor, defina um nome para a escala antes de adicionar atividades.")
+            
+            st.header(f"Escala Atual: {escala_nome or 'Nenhuma selecionada'}")
+            if escala_nome:
+                df_escala_completa = db.buscar_escala_completa(escala_nome)
+                st.dataframe(df_escala_completa, use_container_width=True)
 
-        st.divider()
-        st.subheader("Finalizar e arquivar escala atual")
-        st.write("Isto copia as linhas de 'escolhas_atuais' para 'historico' e adiciona DataArquivamento, depois limpa 'escolhas_atuais'.")
+                # Botões de Exportação
+                col1, col2 = st.columns(2)
+                with col1:
+                    pdf_data = dataframe_to_pdf(df_escala_completa)
+                    st.download_button(
+                        label="📥 Exportar para PDF",
+                        data=pdf_data,
+                        file_name=f"escala_{escala_nome.replace('/', '_')}.pdf",
+                        mime="application/pdf",
+                    )
+                with col2:
+                    excel_data = dataframe_to_excel(df_escala_completa)
+                    st.download_button(
+                        label="📥 Exportar para Excel",
+                        data=excel_data,
+                        file_name=f"escala_{escala_nome.replace('/', '_')}.xlsx",
+                        mime="application/vnd.ms-excel"
+                    )
 
-        if st.button("Finalizar e Arquivar Escala"):
-            try:
-                df_escolhas = read_sheet_df("escolhas_atuais")
-                if df_escolhas.empty:
-                    st.warning("Não há escolhas atuais para arquivar.")
-                else:
-                    # Adiciona coluna DataArquivamento e append a historico linha a linha
-                    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                    # Garante que aba historico exista; se não, cria cabecalho
-                    try:
-                        ws_hist = sh.worksheet("historico")
-                    except gspread.exceptions.WorksheetNotFound:
-                        # criar worksheet com cabeçalho = colunas de df_escolhas + DataArquivamento
-                        header = list(df_escolhas.columns) + ["DataArquivamento"]
-                        sh.add_worksheet(title="historico", rows="1000", cols=str(len(header)))
-                        ws_hist = sh.worksheet("historico")
-                        ws_hist.append_row(header)
 
-                    # Append cada linha ao historico
-                    for _, row in df_escolhas.iterrows():
-                        row_dict = row.to_dict()
-                        row_dict["DataArquivamento"] = timestamp
-                        append_row("historico", row_dict)
+        elif menu_admin == "Configurar Regras":
+            st.header("Configuração de Regras (Em Desenvolvimento) ⚙️")
+            st.info("Esta seção permitirá ativar/desativar regras para a escolha.")
+            st.checkbox("Todos devem fazer pelo menos um plantão em fim de semana.")
+            st.number_input("Número total de atividades por pessoa:", min_value=1)
+            st.checkbox("Exigir que todas as datas sejam preenchidas antes de dobrar vagas.")
+            
+        elif menu_admin == "Histórico":
+            st.header("Histórico de Escalas (Em Desenvolvimento) 📚")
+            st.info("Aqui você poderá visualizar as escalas finalizadas de meses anteriores.")
 
-                    # Limpar escolhas_atuais: sobrescrever com apenas a linha de cabeçalho (vazias)
-                    try:
-                        ws_escolhas = sh.worksheet("escolhas_atuais")
-                        headers = ws_escolhas.row_values(1)
-                        if headers:
-                            ws_escolhas.clear()
-                            ws_escolhas.append_row(headers)
-                        else:
-                            ws_escolhas.clear()
-                    except Exception:
-                        pass
-
-                    st.success(f"Escala arquivada com sucesso em {timestamp} e histórico atualizado.")
-            except Exception as e:
-                st.error(f"Erro ao arquivar: {e}")
-
-        st.divider()
-        st.subheader("Visualizar Histórico")
-        df_hist = read_sheet_df("historico")
-        if df_hist.empty:
-            st.info("Histórico vazio.")
-        else:
-            st.dataframe(df_hist)
-
+    # --- Visão do Participante ---
     else:
-        # Página do usuário comum
-        st.header("Área do Usuário")
-        st.write("Aqui você verá suas escolhas e poderá marcar/selecionar atividades (a implementar).")
-        # Exemplo: mostrar atividades disponíveis
-        df_atividades = read_sheet_df("atividades")
-        st.subheader("Atividades disponíveis")
-        if df_atividades.empty:
-            st.info("Nenhuma atividade disponível.")
-        else:
+        st.sidebar.title("Menu do Participante")
+        menu_user = st.sidebar.radio("Selecione:", ["Escolher Horário", "Minha Escala", "Trocar Horário"])
+
+        if menu_user == "Escolher Horário":
+            st.header("Rodada de Escolha de Horários 🕒")
+            st.info("Funcionalidade de sorteio e escolha em rodadas em desenvolvimento.")
+            
+            # Placeholder para a lógica de rodadas
+            if 'ordem_escolha' not in st.session_state:
+                st.session_state.ordem_escolha = ["Participante 2", "Participante 1", "Admin"] # Exemplo
+            
+            st.write(f"**Ordem da rodada atual:** {', '.join(st.session_state.ordem_escolha)}")
+            st.write(f"**É a vez de:** {st.session_state.ordem_escolha[0]}")
+            
+            escala_vigente = "Dezembro/2025" # Deveria ser dinâmico
+            df_atividades = db.buscar_atividades(escala_vigente)
             st.dataframe(df_atividades)
 
-else:
-    st.error("Falha na autenticação. Verifique usuário/senha.")
+        elif menu_user == "Minha Escala":
+            st.header("Minha Escala Pessoal")
+            st.info("Funcionalidade em desenvolvimento.")
+
+        elif menu_user == "Trocar Horário":
+            st.header("Solicitar Troca de Horários 🔄")
+            st.info("Funcionalidade em desenvolvimento.")
+
+
+elif authentication_status is False:
+    st.error('Usuário/senha está incorreto')
+elif authentication_status is None:
+    st.warning('Por favor, insira seu usuário e senha')
