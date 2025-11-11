@@ -1,112 +1,27 @@
-import streamlit as st
-import streamlit_authenticator as stauth
-import yaml
-from yaml.loader import SafeLoader
+# Exemplo de como a conexão e a leitura seriam feitas
+
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import os
-import datetime  # Importar a biblioteca datetime
 
-# --- Configuração da Página ---
-st.set_page_config(page_title="Gerenciador de Escalas", layout="wide")
+# Criar a conexão (usando os Secrets do Streamlit)
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- Carregar Configurações de Autenticação ---
-with open('config.yaml') as file:
-    config = yaml.load(file, Loader=SafeLoader)
-
-authenticator = stauth.Authenticate(
-    config['credentials'],
-    config['cookie']['name'],
-    config['cookie']['key'],
-    config['cookie']['expiry_days'],
-    config['preauthorized']
+# --- Para ler atividades ---
+df_atividades = conn.read(
+    worksheet="atividades",
+    usecols=[0, 1, 2, 3] # Colunas Tipo, Data, Horario, Vagas
 )
 
-# --- Tela de Login ---
-st.title("Plataforma de Escolha de Escalas de Internato")
-name, authentication_status, username = authenticator.login('Login', 'main')
-
-# --- Lógica Pós-Login ---
-if authentication_status:
-    authenticator.logout('Logout', 'main', key='logout_button')
-    st.write(f'Bem-vindo(a) *{name}*')
-
-    # --- Se o usuário for ADMIN ---
-    if username == 'admin':
-        st.header("Painel do Administrador")
-
-        # --- Formulário para Adicionar Atividades ---
-        with st.form("form_add_activity", clear_on_submit=True):
-            st.subheader("Cadastrar Nova Atividade")
-            tipo_atividade = st.selectbox("Tipo de Atividade", ["Plantão", "Ambulatório", "Enfermaria"])
-            data_atividade = st.date_input("Data da Atividade")
-            horario_atividade = st.time_input("Horário de Início")
-            vagas = st.number_input("Número de Vagas", min_value=1, step=1)
-            
-            submitted = st.form_submit_button("Cadastrar Atividade")
-
-            if submitted:
-                atividades_file = 'atividades.csv'
-                if os.path.exists(atividades_file):
-                    df_atividades_existente = pd.read_csv(atividades_file)
-                else:
-                    df_atividades_existente = pd.DataFrame(columns=['Tipo', 'Data', 'Horario', 'Vagas'])
-                
-                nova_atividade = pd.DataFrame([{'Tipo': tipo_atividade, 'Data': data_atividade.strftime('%Y-%m-%d'), 'Horario': horario_atividade.strftime('%H:%M'), 'Vagas': vagas}])
-                df_atividades_atualizado = pd.concat([df_atividades_existente, nova_atividade], ignore_index=True)
-                df_atividades_atualizado.to_csv(atividades_file, index=False)
-                st.success("Atividade cadastrada com sucesso!")
-
-        # --- Visualização das Atividades Cadastradas ---
-        st.subheader("Atividades Cadastradas")
-        atividades_file = 'atividades.csv'
-        if os.path.exists(atividades_file):
-            df_atividades = pd.read_csv(atividades_file)
-            st.dataframe(df_atividades, use_container_width=True)
-        else:
-            st.info("Nenhuma atividade cadastrada ainda.")
-        
-        # --- NOVA SEÇÃO: FINALIZAR E ARQUIVAR ESCALA ---
-        st.divider() # Adiciona uma linha divisória
-        st.subheader("Finalizar e Arquivar Escala Atual")
-        st.write("Ao clicar no botão abaixo, a escala atual (baseada nas escolhas feitas) será salva permanentemente no histórico. Esta ação não pode ser desfeita.")
-
-        if st.button("Finalizar e Arquivar Escala"):
-            escolhas_atuais_file = 'escolhas_atuais.csv'
-            historico_dir = 'historico'
-
-            # 1. Verificar se há uma escala atual para arquivar
-            if not os.path.exists(escolhas_atuais_file):
-                st.warning("Nenhuma escolha foi feita ainda. Não há nada para arquivar.")
-            else:
-                try:
-                    # 2. Criar o diretório de histórico se ele não existir
-                    if not os.path.exists(historico_dir):
-                        os.makedirs(historico_dir)
-
-                    # 3. Definir o nome do arquivo de histórico com data e hora
-                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                    arquivo_historico = os.path.join(historico_dir, f'escala_finalizada_{timestamp}.csv')
-
-                    # 4. Ler as escolhas atuais e salvá-las no arquivo de histórico
-                    df_escolhas = pd.read_csv(escolhas_atuais_file)
-                    df_escolhas.to_csv(arquivo_historico, index=False)
-                    
-                    # 5. (Opcional, mas recomendado) Limpar o arquivo de escolhas atuais para a próxima rodada
-                    # os.remove(escolhas_atuais_file)
-
-                    st.success(f"Escala arquivada com sucesso em: `{arquivo_historico}`")
-                    st.info("O arquivo de escolhas atuais foi limpo para preparar a próxima escala.")
-                
-                except Exception as e:
-                    st.error(f"Ocorreu um erro ao arquivar a escala: {e}")
-
-    # --- Se for um usuário comum ---
-    else:
-        st.header("Minha Escala")
-        st.write("Aqui você poderá visualizar suas atividades e fazer suas escolhas.")
-        # (Futuras funcionalidades para o usuário virão aqui)
-
-elif authentication_status is False:
-    st.error('Nome de usuário ou senha incorretos')
-elif authentication_status is None:
-    st.warning('Por favor, insira seu nome de usuário e senha')
+# --- Para adicionar uma nova atividade ---
+nova_atividade = pd.DataFrame([
+    {
+        'Tipo': tipo_atividade,
+        'Data': data_atividade.strftime('%Y-%m-%d'),
+        'Horario': horario_atividade.strftime('%H:%M'),
+        'Vagas': vagas
+    }
+])
+# Concatena o dataframe existente com a nova linha
+df_atualizado = pd.concat([df_atividades, nova_atividade])
+# Escreve o dataframe completo de volta na planilha
+conn.update(worksheet="atividades", data=df_atualizado)
