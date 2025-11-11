@@ -8,9 +8,9 @@ credentials:
     
     # --- Usuários Participantes ---
     participante1:
-      email: p1@email.com
-      name: Participante 1
-      password: 'p1'
+      email: d202120265@uftm.edu.br
+      name: Miguel Antonio Janssen
+      password: 'Pi31415@'
     participante2:
       email: p2@email.com
       name: Participante 2
