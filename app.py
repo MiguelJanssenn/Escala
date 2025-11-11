@@ -126,14 +126,16 @@ def add_allowed_email(email):
         if email in allowed_emails:
             return False, "Email já está na lista de permitidos."
         
-        new_email_data = pd.DataFrame([{"email": email}])
-        
         # Lê a planilha atual e adiciona o novo email
         try:
             df_emails = conn.read(worksheet="emails_permitidos")
-            conn.update(worksheet="emails_permitidos", data=new_email_data, offset_rows=len(df_emails))
+            # Append the new email to the existing dataframe
+            new_email_data = pd.DataFrame([{"email": email}])
+            updated_emails = pd.concat([df_emails, new_email_data], ignore_index=True)
+            conn.update(worksheet="emails_permitidos", data=updated_emails)
         except:
             # Se a planilha não existir, cria com o primeiro email
+            new_email_data = pd.DataFrame([{"email": email}])
             conn.update(worksheet="emails_permitidos", data=new_email_data)
         
         return True, "Email adicionado à lista de permitidos!"
@@ -197,7 +199,9 @@ def register_user(name, matricula, email, password):
         # Lê a planilha de usuários para encontrar a próxima linha vazia
         try:
             df_users = conn.read(worksheet="usuarios")
-            conn.update(worksheet="usuarios", data=new_user_data, offset_rows=len(df_users))
+            # Append the new user to the existing dataframe
+            updated_users = pd.concat([df_users, new_user_data], ignore_index=True)
+            conn.update(worksheet="usuarios", data=updated_users)
         except:
             # Se a planilha não existir, cria com o primeiro usuário
             conn.update(worksheet="usuarios", data=new_user_data)
@@ -231,7 +235,9 @@ def register_user_oauth(name, email):
         # Lê a planilha de usuários para encontrar a próxima linha vazia
         try:
             df_users = conn.read(worksheet="usuarios")
-            conn.update(worksheet="usuarios", data=new_user_data, offset_rows=len(df_users))
+            # Append the new user to the existing dataframe
+            updated_users = pd.concat([df_users, new_user_data], ignore_index=True)
+            conn.update(worksheet="usuarios", data=updated_users)
         except:
             # Se a planilha não existir, cria com o primeiro usuário
             conn.update(worksheet="usuarios", data=new_user_data)
@@ -256,7 +262,9 @@ def add_atividade(escala_nome, tipo, data, horario, vagas):
     
     try:
         df_atividades = conn.read(worksheet="atividades")
-        conn.update(worksheet="atividades", data=new_atividade, offset_rows=len(df_atividades))
+        # Append the new activity to the existing dataframe
+        updated_atividades = pd.concat([df_atividades, new_atividade], ignore_index=True)
+        conn.update(worksheet="atividades", data=updated_atividades)
         return True
     except Exception as e:
         st.error(f"Erro ao adicionar atividade: {e}")
@@ -372,8 +380,8 @@ if not st.session_state['logged_in']:
                 oauth_config["client_secret"],
                 oauth_config["authorize_endpoint"],
                 oauth_config["token_endpoint"],
-                oauth_config["token_endpoint"],
-                None
+                oauth_config["token_endpoint"],  # refresh_token_endpoint
+                None  # revoke_token_endpoint
             )
             
             result = oauth2.authorize_button(
