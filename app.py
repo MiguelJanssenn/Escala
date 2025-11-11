@@ -78,11 +78,14 @@ def get_user_data(email):
     """Busca os dados do usuário pelo email."""
     try:
         df_users = conn.read(worksheet="usuarios", usecols=[0, 1, 2, 3], ttl=5)
-        user_data = df_users[df_users['email'] == email]
-        if not user_data.empty:
-            return user_data.iloc[0]
+        if not df_users.empty:
+            user_data = df_users[df_users['email'] == email]
+            if not user_data.empty:
+                return user_data.iloc[0]
     except Exception as e:
-        st.error(f"Erro ao ler dados de usuários: {e}")
+        # Se a planilha não existir ainda ou houver erro de autenticação, retorna None
+        # O erro será tratado no contexto de uso
+        pass
     return None
 
 def register_user(name, matricula, email, password):
@@ -106,8 +109,12 @@ def register_user(name, matricula, email, password):
     
     try:
         # Lê a planilha de usuários para encontrar a próxima linha vazia
-        df_users = conn.read(worksheet="usuarios")
-        conn.update(worksheet="usuarios", data=new_user_data, offset_rows=len(df_users))
+        try:
+            df_users = conn.read(worksheet="usuarios")
+            conn.update(worksheet="usuarios", data=new_user_data, offset_rows=len(df_users))
+        except:
+            # Se a planilha não existir, cria com o primeiro usuário
+            conn.update(worksheet="usuarios", data=new_user_data)
         return True, "Usuário registrado com sucesso!"
     except Exception as e:
         return False, f"Erro ao registrar: {e}"
