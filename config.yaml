@@ -1,21 +1,30 @@
+# config.yaml
+
 credentials:
   usernames:
+    # --- Usuário Administrador ---
     admin:
-      email: admin@example.com
+      email: admin@email.com
       name: Administrador
-      password: '$2b$12$EixZaYdD2rLG.bW4z6i9Feu1V5n.gy2kLPUS3TqfT.2R4raf/bEAq' # Senha: admin123
-    user1:
-      email: user1@example.com
-      name: Usuário 1
-      password: '$2b$12$L/4Jj7A40iP1j4q2k3v8J.j9G2/U8e9X0qV5f8Z5n.L.5f8w3B/eC' # Senha: user123
-    user2:
-      email: user2@example.com
-      name: Usuário 2
-      password: '$2b$12$L/4Jj7A40iP1j4q2k3v8J.j9G2/U8e9X0qV5f8Z5n.L.5f8w3B/eC' # Senha: user123
+      password: 'admin123' # Substitua por uma senha hasheada
+    # --- Usuários Participantes ---
+    participante1:
+      email: p1@email.com
+      name: Participante 1
+      password: 'p1'
+    participante2:
+      email: p2@email.com
+      name: Participante 2
+      password: 'p2'
+    # Adicione os outros 8 participantes aqui...
+    participante10:
+      email: p10@email.com
+      name: Participante 10
+      password: 'p10'
 cookie:
   expiry_days: 30
-  key: some_signature_key
-  name: some_cookie
+  key: 'some_random_secret_key' # Mude para uma chave secreta aleatória
+  name: 'escala_cookie'
 preauthorized:
   emails:
-  - admin@example.com
+  - melsby@gmail.com
