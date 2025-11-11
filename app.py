@@ -52,7 +52,49 @@ def get_google_oauth_config():
 
 # --- Conexão com Google Sheets ---
 # Usa os segredos (Secrets) do Streamlit Cloud
-conn = st.connection("gsheets", type=GSheetsConnection)
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    
+    # Verifica se está usando Service Account (necessário para write operations)
+    if not hasattr(st, 'secrets') or 'connections' not in st.secrets or 'gsheets' not in st.secrets['connections']:
+        st.error("⚠️ **ERRO DE CONFIGURAÇÃO**: Google Sheets não está configurado!")
+        st.error("Você precisa configurar o Service Account para usar esta aplicação.")
+        st.info("📖 **Consulte o guia completo**: [GOOGLE_SHEETS_SETUP.md](https://github.com/MiguelJanssenn/Escala/blob/main/GOOGLE_SHEETS_SETUP.md)")
+        st.stop()
+    
+    # Verifica se está usando service account
+    gsheets_config = st.secrets['connections']['gsheets']
+    if 'type' not in gsheets_config or gsheets_config['type'] != 'service_account':
+        st.error("⚠️ **ERRO DE AUTENTICAÇÃO**: Service Account não configurado!")
+        st.warning("""
+        O erro **"Public Spreadsheet cannot be written to"** ocorre porque você está tentando 
+        usar uma planilha pública (somente leitura) em vez de autenticação com Service Account.
+        
+        **Para corrigir este problema:**
+        1. Crie um Service Account no Google Cloud Console
+        2. Configure o arquivo `.streamlit/secrets.toml` com as credenciais do Service Account
+        3. Compartilhe sua planilha Google Sheets com o email do Service Account
+        """)
+        st.info("📖 **Guia completo de configuração**: [GOOGLE_SHEETS_SETUP.md](https://github.com/MiguelJanssenn/Escala/blob/main/GOOGLE_SHEETS_SETUP.md)")
+        st.stop()
+        
+except Exception as e:
+    st.error("⚠️ **ERRO ao conectar com Google Sheets**")
+    st.error(f"Detalhes do erro: {str(e)}")
+    
+    if "Public Spreadsheet cannot be written to" in str(e):
+        st.warning("""
+        **Este erro significa que você está tentando usar uma planilha pública (somente leitura).**
+        
+        Para usar esta aplicação, você precisa:
+        1. Criar um Service Account no Google Cloud
+        2. Configurar as credenciais no arquivo `.streamlit/secrets.toml`
+        3. Compartilhar sua planilha com o email do Service Account
+        """)
+    
+    st.info("📖 **Consulte o guia completo**: [GOOGLE_SHEETS_SETUP.md](https://github.com/MiguelJanssenn/Escala/blob/main/GOOGLE_SHEETS_SETUP.md)")
+    st.info("💡 **Exemplo de configuração**: Veja o arquivo `.streamlit/secrets.toml.example`")
+    st.stop()
 
 # --- Funções de Hash de Senha ---
 def hash_password(password):
@@ -96,7 +138,10 @@ def add_allowed_email(email):
         
         return True, "Email adicionado à lista de permitidos!"
     except Exception as e:
-        return False, f"Erro ao adicionar email: {e}"
+        error_msg = str(e)
+        if "Public Spreadsheet cannot be written to" in error_msg:
+            return False, "⚠️ ERRO DE CONFIGURAÇÃO: O Google Sheets não está configurado com Service Account. Consulte GOOGLE_SHEETS_SETUP.md para instruções."
+        return False, f"Erro ao adicionar email: {error_msg}"
 
 def remove_allowed_email(email):
     """Remove um email da lista de permitidos."""
@@ -110,7 +155,10 @@ def remove_allowed_email(email):
         conn.update(worksheet="emails_permitidos", data=df_emails_filtered)
         return True, "Email removido da lista de permitidos!"
     except Exception as e:
-        return False, f"Erro ao remover email: {e}"
+        error_msg = str(e)
+        if "Public Spreadsheet cannot be written to" in error_msg:
+            return False, "⚠️ ERRO DE CONFIGURAÇÃO: O Google Sheets não está configurado com Service Account. Consulte GOOGLE_SHEETS_SETUP.md para instruções."
+        return False, f"Erro ao remover email: {error_msg}"
 
 def get_user_data(email):
     """Busca os dados do usuário pelo email."""
@@ -155,7 +203,10 @@ def register_user(name, matricula, email, password):
             conn.update(worksheet="usuarios", data=new_user_data)
         return True, "Usuário registrado com sucesso!"
     except Exception as e:
-        return False, f"Erro ao registrar: {e}"
+        error_msg = str(e)
+        if "Public Spreadsheet cannot be written to" in error_msg:
+            return False, "⚠️ ERRO DE CONFIGURAÇÃO: O Google Sheets não está configurado com Service Account. Consulte GOOGLE_SHEETS_SETUP.md para instruções."
+        return False, f"Erro ao registrar: {error_msg}"
 
 def register_user_oauth(name, email):
     """Registra um novo usuário via OAuth (sem senha)."""
@@ -186,7 +237,10 @@ def register_user_oauth(name, email):
             conn.update(worksheet="usuarios", data=new_user_data)
         return True, "Usuário registrado com sucesso via Google!"
     except Exception as e:
-        return False, f"Erro ao registrar: {e}"
+        error_msg = str(e)
+        if "Public Spreadsheet cannot be written to" in error_msg:
+            return False, "⚠️ ERRO DE CONFIGURAÇÃO: O Google Sheets não está configurado com Service Account. Consulte GOOGLE_SHEETS_SETUP.md para instruções."
+        return False, f"Erro ao registrar: {error_msg}"
 
 def add_atividade(escala_nome, tipo, data, horario, vagas):
     """Adiciona uma nova atividade ao banco de dados."""

@@ -1,5 +1,24 @@
 # Plataforma de Organização de Escalas
 
+## ⚠️ CONFIGURAÇÃO OBRIGATÓRIA - Google Sheets Service Account
+
+**Antes de usar a aplicação, você DEVE configurar o Google Sheets com Service Account!**
+
+Se você receber o erro: *"Public Spreadsheet cannot be written to, use Service Account authentication to enable CRUD methods on your Spreadsheets"*, isso significa que a autenticação com Service Account não foi configurada.
+
+📖 **Siga o guia completo**: [GOOGLE_SHEETS_SETUP.md](GOOGLE_SHEETS_SETUP.md)
+
+Este guia mostrará como:
+1. Criar um Service Account no Google Cloud
+2. Habilitar as APIs necessárias (Google Sheets e Drive)
+3. Baixar as credenciais JSON
+4. Configurar o arquivo `secrets.toml` do Streamlit
+5. Compartilhar sua planilha com o Service Account
+
+**Sem esta configuração, o aplicativo não conseguirá salvar ou ler dados!**
+
+---
+
 ## Primeiro Acesso - Login do Administrador
 
 ### Como criar a conta de administrador:
@@ -60,5 +79,21 @@ ADMIN_EMAIL = "seu-email@exemplo.com"  # Altere aqui
 
 ## Documentação
 
+- **🔧 Configuração do Google Sheets (OBRIGATÓRIO)**: [GOOGLE_SHEETS_SETUP.md](GOOGLE_SHEETS_SETUP.md)
 - **Whitelist de Emails**: [WHITELIST_FEATURE.md](WHITELIST_FEATURE.md)
-- **Configuração do Google OAuth**: [GOOGLE_OAUTH_SETUP.md](GOOGLE_OAUTH_SETUP.md)
+- **Configuração do Google OAuth (Opcional)**: [GOOGLE_OAUTH_SETUP.md](GOOGLE_OAUTH_SETUP.md)
+
+## Estrutura de Arquivos
+
+```
+.
+├── app.py                          # Aplicação principal
+├── requirements.txt                # Dependências Python
+├── .streamlit/
+│   ├── secrets.toml.example       # Exemplo de configuração
+│   └── secrets.toml               # Suas credenciais (não commitar!)
+├── GOOGLE_SHEETS_SETUP.md         # Guia de configuração do Google Sheets
+├── GOOGLE_OAUTH_SETUP.md          # Guia de configuração do OAuth
+├── WHITELIST_FEATURE.md           # Documentação da whitelist
+└── README.md                      # Este arquivo
+```
