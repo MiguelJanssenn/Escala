@@ -22,8 +22,8 @@ authenticator = stauth.Authenticate(
     config['credentials'],
     config['cookie']['name'],
     config['cookie']['key'],
-    config['cookie']['expiry_days'],
-    config['preauthorized']
+    config['cookie']['expiry_days']
+    # O parâmetro 'preauthorized' foi removido daqui
 )
 
 st.title("Plataforma de Organização de Escalas 🩺")
