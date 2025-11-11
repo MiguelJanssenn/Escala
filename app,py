@@ -4,6 +4,7 @@ import yaml
 from yaml.loader import SafeLoader
 import pandas as pd
 import os
+import datetime  # Importar a biblioteca datetime
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="Gerenciador de Escalas", layout="wide")
@@ -44,22 +45,13 @@ if authentication_status:
             submitted = st.form_submit_button("Cadastrar Atividade")
 
             if submitted:
-                # Carregar ou criar o arquivo de atividades
                 atividades_file = 'atividades.csv'
                 if os.path.exists(atividades_file):
                     df_atividades_existente = pd.read_csv(atividades_file)
                 else:
                     df_atividades_existente = pd.DataFrame(columns=['Tipo', 'Data', 'Horario', 'Vagas'])
-
-                # Criar nova linha para a atividade
-                nova_atividade = pd.DataFrame([{
-                    'Tipo': tipo_atividade,
-                    'Data': data_atividade.strftime('%Y-%m-%d'),
-                    'Horario': horario_atividade.strftime('%H:%M'),
-                    'Vagas': vagas
-                }])
-
-                # Adicionar e salvar
+                
+                nova_atividade = pd.DataFrame([{'Tipo': tipo_atividade, 'Data': data_atividade.strftime('%Y-%m-%d'), 'Horario': horario_atividade.strftime('%H:%M'), 'Vagas': vagas}])
                 df_atividades_atualizado = pd.concat([df_atividades_existente, nova_atividade], ignore_index=True)
                 df_atividades_atualizado.to_csv(atividades_file, index=False)
                 st.success("Atividade cadastrada com sucesso!")
@@ -72,6 +64,41 @@ if authentication_status:
             st.dataframe(df_atividades, use_container_width=True)
         else:
             st.info("Nenhuma atividade cadastrada ainda.")
+        
+        # --- NOVA SEÇÃO: FINALIZAR E ARQUIVAR ESCALA ---
+        st.divider() # Adiciona uma linha divisória
+        st.subheader("Finalizar e Arquivar Escala Atual")
+        st.write("Ao clicar no botão abaixo, a escala atual (baseada nas escolhas feitas) será salva permanentemente no histórico. Esta ação não pode ser desfeita.")
+
+        if st.button("Finalizar e Arquivar Escala"):
+            escolhas_atuais_file = 'escolhas_atuais.csv'
+            historico_dir = 'historico'
+
+            # 1. Verificar se há uma escala atual para arquivar
+            if not os.path.exists(escolhas_atuais_file):
+                st.warning("Nenhuma escolha foi feita ainda. Não há nada para arquivar.")
+            else:
+                try:
+                    # 2. Criar o diretório de histórico se ele não existir
+                    if not os.path.exists(historico_dir):
+                        os.makedirs(historico_dir)
+
+                    # 3. Definir o nome do arquivo de histórico com data e hora
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    arquivo_historico = os.path.join(historico_dir, f'escala_finalizada_{timestamp}.csv')
+
+                    # 4. Ler as escolhas atuais e salvá-las no arquivo de histórico
+                    df_escolhas = pd.read_csv(escolhas_atuais_file)
+                    df_escolhas.to_csv(arquivo_historico, index=False)
+                    
+                    # 5. (Opcional, mas recomendado) Limpar o arquivo de escolhas atuais para a próxima rodada
+                    # os.remove(escolhas_atuais_file)
+
+                    st.success(f"Escala arquivada com sucesso em: `{arquivo_historico}`")
+                    st.info("O arquivo de escolhas atuais foi limpo para preparar a próxima escala.")
+                
+                except Exception as e:
+                    st.error(f"Ocorreu um erro ao arquivar a escala: {e}")
 
     # --- Se for um usuário comum ---
     else:
