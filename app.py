@@ -598,8 +598,8 @@ def dataframe_to_pdf(df):
                 pdf.multi_cell(col_widths[i], 10, str(item), 1, 'L')
         pdf.ln()
     
-    # fpdf2 now returns bytes directly without dest parameter
-    return pdf.output()
+    # fpdf2 returns bytearray, convert to bytes for streamlit compatibility
+    return bytes(pdf.output())
 
 def dataframe_to_excel(df):
     output = io.BytesIO()
