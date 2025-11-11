@@ -5,12 +5,50 @@ import bcrypt
 import time
 import uuid
 
+try:
+    from streamlit_oauth import OAuth2Component
+    OAUTH_AVAILABLE = True
+except ImportError:
+    OAUTH_AVAILABLE = False
+    st.warning("Módulo streamlit-oauth não está disponível. Login com Google está desabilitado.")
+
 # --- Configuração da Página ---
 st.set_page_config(page_title="Plataforma de Escalas", layout="wide")
 st.title("Plataforma de Organização de Escalas 🩺")
 
 # Email que define quem é o administrador
 ADMIN_EMAIL = "admin@email.com" # Mude para o seu email de admin
+
+# --- Configuração do Google OAuth (Opcional) ---
+# Para habilitar login com Google, adicione as seguintes variáveis em .streamlit/secrets.toml:
+# GOOGLE_CLIENT_ID = "seu-client-id.apps.googleusercontent.com"
+# GOOGLE_CLIENT_SECRET = "seu-client-secret"
+# GOOGLE_REDIRECT_URI = "https://sua-app.streamlit.app"
+
+def get_google_oauth_config():
+    """Retorna a configuração do Google OAuth se disponível."""
+    if not OAUTH_AVAILABLE:
+        return None
+    
+    try:
+        client_id = st.secrets.get("GOOGLE_CLIENT_ID")
+        client_secret = st.secrets.get("GOOGLE_CLIENT_SECRET")
+        redirect_uri = st.secrets.get("GOOGLE_REDIRECT_URI")
+        
+        if client_id and client_secret and redirect_uri:
+            return {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "authorize_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+                "token_endpoint": "https://oauth2.googleapis.com/token",
+                "userinfo_endpoint": "https://www.googleapis.com/oauth2/v1/userinfo",
+                "scope": "openid email profile"
+            }
+    except:
+        pass
+    
+    return None
 
 # --- Conexão com Google Sheets ---
 # Usa os segredos (Secrets) do Streamlit Cloud
@@ -119,6 +157,37 @@ def register_user(name, matricula, email, password):
     except Exception as e:
         return False, f"Erro ao registrar: {e}"
 
+def register_user_oauth(name, email):
+    """Registra um novo usuário via OAuth (sem senha)."""
+    if get_user_data(email) is not None:
+        return False, "E-mail já cadastrado."
+    
+    # Verifica se o email está na lista de permitidos
+    # O email do administrador sempre pode se registrar
+    allowed_emails = get_allowed_emails()
+    if email != ADMIN_EMAIL and email not in allowed_emails:
+        return False, "E-mail não autorizado. Entre em contato com o administrador para solicitar acesso."
+    
+    # Para usuários OAuth, não há senha (usa hash vazio como marcador)
+    new_user_data = pd.DataFrame([{
+        "nome": name,
+        "matricula": "OAUTH",  # Matrícula padrão para usuários OAuth
+        "email": email,
+        "senha_hash": "OAUTH_USER"  # Marcador para identificar usuários OAuth
+    }])
+    
+    try:
+        # Lê a planilha de usuários para encontrar a próxima linha vazia
+        try:
+            df_users = conn.read(worksheet="usuarios")
+            conn.update(worksheet="usuarios", data=new_user_data, offset_rows=len(df_users))
+        except:
+            # Se a planilha não existir, cria com o primeiro usuário
+            conn.update(worksheet="usuarios", data=new_user_data)
+        return True, "Usuário registrado com sucesso via Google!"
+    except Exception as e:
+        return False, f"Erro ao registrar: {e}"
+
 def add_atividade(escala_nome, tipo, data, horario, vagas):
     """Adiciona uma nova atividade ao banco de dados."""
     atividade_id = str(uuid.uuid4()) # Gera um ID único
@@ -215,6 +284,7 @@ if not st.session_state['logged_in']:
     tab_login, tab_register = st.tabs(["Login", "Registrar"])
     
     with tab_login:
+        st.subheader("Login com Email e Senha")
         with st.form("login_form"):
             email = st.text_input("Email")
             password = st.text_input("Senha", type="password")
@@ -222,14 +292,83 @@ if not st.session_state['logged_in']:
             
             if login_button:
                 user_data = get_user_data(email)
-                if user_data is not None and check_password(password, user_data['senha_hash']):
-                    st.session_state['logged_in'] = True
-                    st.session_state['user_name'] = user_data['nome']
-                    st.session_state['user_email'] = user_data['email']
-                    st.session_state['is_admin'] = (user_data['email'] == ADMIN_EMAIL)
-                    st.rerun() # Recarrega a página para o estado "logado"
+                if user_data is not None:
+                    # Verifica se é usuário OAuth ou tradicional
+                    if user_data['senha_hash'] == "OAUTH_USER":
+                        st.error("Esta conta foi criada com Google. Use 'Login com Google' abaixo.")
+                    elif check_password(password, user_data['senha_hash']):
+                        st.session_state['logged_in'] = True
+                        st.session_state['user_name'] = user_data['nome']
+                        st.session_state['user_email'] = user_data['email']
+                        st.session_state['is_admin'] = (user_data['email'] == ADMIN_EMAIL)
+                        st.rerun() # Recarrega a página para o estado "logado"
+                    else:
+                        st.error("Email ou senha incorretos.")
                 else:
                     st.error("Email ou senha incorretos.")
+        
+        # Adiciona opção de login com Google se estiver configurado
+        oauth_config = get_google_oauth_config()
+        if oauth_config:
+            st.divider()
+            st.subheader("Ou faça login com Google")
+            
+            oauth2 = OAuth2Component(
+                oauth_config["client_id"],
+                oauth_config["client_secret"],
+                oauth_config["authorize_endpoint"],
+                oauth_config["token_endpoint"],
+                oauth_config["token_endpoint"],
+                None
+            )
+            
+            result = oauth2.authorize_button(
+                name="Login com Google",
+                redirect_uri=oauth_config["redirect_uri"],
+                scope=oauth_config["scope"],
+                key="google_oauth",
+                extras_params={"access_type": "offline", "prompt": "consent"}
+            )
+            
+            if result and 'token' in result:
+                # Busca informações do usuário
+                import requests
+                headers = {"Authorization": f"Bearer {result['token']['access_token']}"}
+                response = requests.get(oauth_config["userinfo_endpoint"], headers=headers)
+                
+                if response.status_code == 200:
+                    user_info = response.json()
+                    email = user_info.get('email', '').lower()
+                    name = user_info.get('name', '')
+                    
+                    # Verifica se o usuário existe
+                    user_data = get_user_data(email)
+                    
+                    if user_data is not None:
+                        # Usuário já existe, faz login
+                        st.session_state['logged_in'] = True
+                        st.session_state['user_name'] = user_data['nome']
+                        st.session_state['user_email'] = user_data['email']
+                        st.session_state['is_admin'] = (user_data['email'] == ADMIN_EMAIL)
+                        st.rerun()
+                    else:
+                        # Usuário não existe, tenta registrar automaticamente
+                        success, message = register_user_oauth(name, email)
+                        if success:
+                            # Registrou com sucesso, faz login automaticamente
+                            st.session_state['logged_in'] = True
+                            st.session_state['user_name'] = name
+                            st.session_state['user_email'] = email
+                            st.session_state['is_admin'] = (email == ADMIN_EMAIL)
+                            st.success(message)
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(message)
+                else:
+                    st.error("Erro ao obter informações do usuário do Google.")
+        else:
+            st.info("💡 **Dica:** O administrador pode habilitar o login com Google configurando as credenciais OAuth no Streamlit Secrets.")
 
     with tab_register:
         with st.form("register_form"):
