@@ -27,6 +27,53 @@ def check_password(password, hashed):
 
 # --- Funções de Banco de Dados (Google Sheets) ---
 
+def get_allowed_emails():
+    """Busca a lista de emails permitidos para cadastro."""
+    try:
+        df_emails = conn.read(worksheet="emails_permitidos", usecols=[0], ttl=5)
+        if not df_emails.empty:
+            return df_emails['email'].tolist()
+        return []
+    except Exception as e:
+        # Se a planilha não existir ainda, retorna lista vazia
+        return []
+
+def add_allowed_email(email):
+    """Adiciona um email à lista de permitidos."""
+    try:
+        # Verifica se o email já existe
+        allowed_emails = get_allowed_emails()
+        if email in allowed_emails:
+            return False, "Email já está na lista de permitidos."
+        
+        new_email_data = pd.DataFrame([{"email": email}])
+        
+        # Lê a planilha atual e adiciona o novo email
+        try:
+            df_emails = conn.read(worksheet="emails_permitidos")
+            conn.update(worksheet="emails_permitidos", data=new_email_data, offset_rows=len(df_emails))
+        except:
+            # Se a planilha não existir, cria com o primeiro email
+            conn.update(worksheet="emails_permitidos", data=new_email_data)
+        
+        return True, "Email adicionado à lista de permitidos!"
+    except Exception as e:
+        return False, f"Erro ao adicionar email: {e}"
+
+def remove_allowed_email(email):
+    """Remove um email da lista de permitidos."""
+    try:
+        df_emails = conn.read(worksheet="emails_permitidos")
+        df_emails_filtered = df_emails[df_emails['email'] != email]
+        
+        if len(df_emails_filtered) == len(df_emails):
+            return False, "Email não encontrado na lista."
+        
+        conn.update(worksheet="emails_permitidos", data=df_emails_filtered)
+        return True, "Email removido da lista de permitidos!"
+    except Exception as e:
+        return False, f"Erro ao remover email: {e}"
+
 def get_user_data(email):
     """Busca os dados do usuário pelo email."""
     try:
@@ -42,6 +89,12 @@ def register_user(name, matricula, email, password):
     """Registra um novo usuário na planilha."""
     if get_user_data(email) is not None:
         return False, "E-mail já cadastrado."
+    
+    # Verifica se o email está na lista de permitidos
+    # O email do administrador sempre pode se registrar
+    allowed_emails = get_allowed_emails()
+    if email != ADMIN_EMAIL and email not in allowed_emails:
+        return False, "E-mail não autorizado. Entre em contato com o administrador para solicitar acesso."
     
     hashed_pw = hash_password(password)
     new_user_data = pd.DataFrame([{
@@ -205,7 +258,7 @@ else:
     # --- Visão do Administrador ---
     if st.session_state['is_admin']:
         st.sidebar.title("Painel do Administrador")
-        menu_admin = st.sidebar.radio("Selecione:", ["Criar/Ver Escala", "Configurar Regras", "Histórico"])
+        menu_admin = st.sidebar.radio("Selecione:", ["Criar/Ver Escala", "Gerenciar Emails Permitidos", "Configurar Regras", "Histórico"])
 
         if menu_admin == "Criar/Ver Escala":
             st.header("Gerenciador de Escalas 🗓️")
@@ -250,6 +303,47 @@ else:
                         file_name=f"escala_{escala_nome.replace('/', '_')}.xlsx",
                         mime="application/vnd.ms-excel"
                     )
+
+        elif menu_admin == "Gerenciar Emails Permitidos":
+            st.header("Gerenciar Emails Permitidos para Cadastro 📧")
+            
+            # Adicionar novo email
+            with st.form("form_add_email", clear_on_submit=True):
+                st.subheader("Adicionar Email à Lista de Permitidos")
+                new_email = st.text_input("Email para permitir cadastro:")
+                add_email_button = st.form_submit_button("Adicionar Email")
+                
+                if add_email_button:
+                    if new_email:
+                        success, message = add_allowed_email(new_email.strip().lower())
+                        if success:
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+                    else:
+                        st.warning("Por favor, digite um email válido.")
+            
+            # Mostrar lista de emails permitidos
+            st.subheader("Lista de Emails Autorizados")
+            allowed_emails = get_allowed_emails()
+            
+            if allowed_emails:
+                df_allowed = pd.DataFrame(allowed_emails, columns=["Email"])
+                st.dataframe(df_allowed, use_container_width=True)
+                
+                # Remover email
+                st.subheader("Remover Email da Lista")
+                email_to_remove = st.selectbox("Selecione o email para remover:", allowed_emails)
+                if st.button("Remover Email Selecionado"):
+                    success, message = remove_allowed_email(email_to_remove)
+                    if success:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+            else:
+                st.info("Nenhum email cadastrado na lista de permitidos. Adicione emails acima para permitir novos cadastros.")
 
         elif menu_admin == "Configurar Regras":
             st.header("Configuração de Regras (Em Desenvolvimento) ⚙️")
