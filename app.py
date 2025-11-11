@@ -29,18 +29,31 @@ def check_password(password, hashed):
 
 def get_user_data(email):
     """Busca os dados do usuário pelo email."""
+    # Primeiro, tenta buscar em usuarios
     try:
         df_users = conn.read(worksheet="usuarios", usecols=[0, 1, 2, 3], ttl=5)
         user_data = df_users[df_users['email'] == email]
         if not user_data.empty:
-            return user_data.iloc[0]
+            return user_data.iloc[0], 'usuario'
     except Exception as e:
         st.error(f"Erro ao ler dados de usuários: {e}")
-    return None
+    
+    # Se não encontrar, tenta buscar em convidados
+    try:
+        df_guests = conn.read(worksheet="convidados", usecols=[0, 1], ttl=5)
+        guest_data = df_guests[df_guests['email'] == email]
+        if not guest_data.empty:
+            return guest_data.iloc[0], 'convidado'
+    except Exception as e:
+        # Se a aba não existir ainda, ignora o erro
+        pass
+    
+    return None, None
 
 def register_user(name, matricula, email, password):
     """Registra um novo usuário na planilha."""
-    if get_user_data(email) is not None:
+    user_data, user_type = get_user_data(email)
+    if user_data is not None:
         return False, "E-mail já cadastrado."
     
     hashed_pw = hash_password(password)
@@ -56,6 +69,25 @@ def register_user(name, matricula, email, password):
         df_users = conn.read(worksheet="usuarios")
         conn.update(worksheet="usuarios", data=new_user_data, offset_rows=len(df_users))
         return True, "Usuário registrado com sucesso!"
+    except Exception as e:
+        return False, f"Erro ao registrar: {e}"
+
+def register_guest(name, email):
+    """Registra um novo convidado na planilha."""
+    user_data, user_type = get_user_data(email)
+    if user_data is not None:
+        return False, "E-mail já cadastrado."
+    
+    new_guest_data = pd.DataFrame([{
+        "nome": name,
+        "email": email
+    }])
+    
+    try:
+        # Lê a planilha de convidados para encontrar a próxima linha vazia
+        df_guests = conn.read(worksheet="convidados")
+        conn.update(worksheet="convidados", data=new_guest_data, offset_rows=len(df_guests))
+        return True, "Convidado registrado com sucesso!"
     except Exception as e:
         return False, f"Erro ao registrar: {e}"
 
@@ -161,38 +193,70 @@ if not st.session_state['logged_in']:
             login_button = st.form_submit_button("Entrar")
             
             if login_button:
-                user_data = get_user_data(email)
-                if user_data is not None and check_password(password, user_data['senha_hash']):
-                    st.session_state['logged_in'] = True
-                    st.session_state['user_name'] = user_data['nome']
-                    st.session_state['user_email'] = user_data['email']
-                    st.session_state['is_admin'] = (user_data['email'] == ADMIN_EMAIL)
-                    st.rerun() # Recarrega a página para o estado "logado"
+                user_data, user_type = get_user_data(email)
+                if user_data is not None:
+                    # Convidados não têm senha, então fazem login apenas com email
+                    if user_type == 'convidado':
+                        st.session_state['logged_in'] = True
+                        st.session_state['user_name'] = user_data['nome']
+                        st.session_state['user_email'] = user_data['email']
+                        st.session_state['is_admin'] = False
+                        st.rerun()
+                    # Usuarios regulares precisam de senha
+                    elif user_type == 'usuario' and check_password(password, user_data['senha_hash']):
+                        st.session_state['logged_in'] = True
+                        st.session_state['user_name'] = user_data['nome']
+                        st.session_state['user_email'] = user_data['email']
+                        st.session_state['is_admin'] = (user_data['email'] == ADMIN_EMAIL)
+                        st.rerun()
+                    else:
+                        st.error("Email ou senha incorretos.")
                 else:
                     st.error("Email ou senha incorretos.")
 
     with tab_register:
-        with st.form("register_form"):
-            name = st.text_input("Nome Completo")
-            matricula = st.text_input("Matrícula")
-            email = st.text_input("Email (o admin deve usar o email: " + ADMIN_EMAIL + ")")
-            password = st.text_input("Senha", type="password")
-            confirm_password = st.text_input("Confirmar Senha", type="password")
-            register_button = st.form_submit_button("Registrar")
-            
-            if register_button:
-                if password != confirm_password:
-                    st.error("As senhas não coincidem.")
-                elif not all([name, matricula, email, password]):
-                    st.error("Por favor, preencha todos os campos.")
-                else:
-                    success, message = register_user(name, matricula, email, password)
-                    if success:
-                        st.success(message + " Agora você pode fazer o login.")
-                        time.sleep(2)
-                        st.rerun()
+        st.subheader("Escolha o tipo de cadastro:")
+        tipo_cadastro = st.radio("", ["Usuário Regular", "Convidado"], horizontal=True)
+        
+        if tipo_cadastro == "Usuário Regular":
+            with st.form("register_form"):
+                name = st.text_input("Nome Completo")
+                matricula = st.text_input("Matrícula")
+                email = st.text_input("Email (o admin deve usar o email: " + ADMIN_EMAIL + ")")
+                password = st.text_input("Senha", type="password")
+                confirm_password = st.text_input("Confirmar Senha", type="password")
+                register_button = st.form_submit_button("Registrar")
+                
+                if register_button:
+                    if password != confirm_password:
+                        st.error("As senhas não coincidem.")
+                    elif not all([name, matricula, email, password]):
+                        st.error("Por favor, preencha todos os campos.")
                     else:
-                        st.error(message)
+                        success, message = register_user(name, matricula, email, password)
+                        if success:
+                            st.success(message + " Agora você pode fazer o login.")
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error(message)
+        else:
+            with st.form("register_guest_form"):
+                name = st.text_input("Nome Completo")
+                email = st.text_input("Email")
+                register_button = st.form_submit_button("Registrar como Convidado")
+                
+                if register_button:
+                    if not all([name, email]):
+                        st.error("Por favor, preencha todos os campos.")
+                    else:
+                        success, message = register_guest(name, email)
+                        if success:
+                            st.success(message + " Agora você pode fazer o login.")
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error(message)
 
 # --- Aplicação Principal (Se estiver logado) ---
 else:
