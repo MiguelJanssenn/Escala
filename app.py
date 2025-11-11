@@ -299,7 +299,7 @@ def get_escala_completa(escala_nome, sort_chronologically=True):
         
         atividades_escala = df_atividades[df_atividades['escala_nome'] == escala_nome]
         if atividades_escala.empty:
-            return pd.DataFrame(columns=['Tipo', 'Data', 'Horário', 'Vagas', 'Participantes'])
+            return pd.DataFrame(columns=['Tipo', 'Data', 'Horário', 'Vagas', 'Participantes', 'Observações'])
         
         # Agrupa os participantes por atividade
         escolhas_agrupadas = df_escolhas.groupby('id_atividade')['nome_participante'].apply(lambda x: ', '.join(x)).reset_index()
@@ -313,21 +313,50 @@ def get_escala_completa(escala_nome, sort_chronologically=True):
         )
         
         df_final['Participantes'] = df_final['nome_participante'].fillna('')
-        df_final = df_final[['tipo', 'data', 'horario', 'vagas', 'Participantes']]
-        df_final.columns = ['Tipo', 'Data', 'Horário', 'Vagas', 'Participantes']
+        
+        # Inclui observações se existir, senão cria coluna vazia
+        if 'observacoes' in df_final.columns:
+            df_final = df_final[['tipo', 'data', 'horario', 'vagas', 'Participantes', 'observacoes']]
+            df_final.columns = ['Tipo', 'Data', 'Horário', 'Vagas', 'Participantes', 'Observações']
+        else:
+            df_final = df_final[['tipo', 'data', 'horario', 'vagas', 'Participantes']]
+            df_final.columns = ['Tipo', 'Data', 'Horário', 'Vagas', 'Participantes']
+            df_final['Observações'] = ''
+        
+        # Formata a data para dd/mm/YYYY
+        try:
+            df_final['data_temp'] = pd.to_datetime(df_final['Data'], format='%d/%m/%Y', errors='coerce')
+            if df_final['data_temp'].isna().all():
+                # Se falhou, tenta formato YYYY-MM-DD
+                df_final['data_temp'] = pd.to_datetime(df_final['Data'], format='%Y-%m-%d', errors='coerce')
+            # Converte para dd/mm/YYYY
+            df_final['Data'] = df_final['data_temp'].dt.strftime('%d/%m/%Y')
+        except:
+            pass  # Mantém o formato original se falhar
         
         # Ordena cronologicamente se solicitado
         if sort_chronologically:
-            df_final['data_sort'] = pd.to_datetime(df_final['Data'])
+            try:
+                df_final['data_sort'] = pd.to_datetime(df_final['Data'], format='%d/%m/%Y', errors='coerce')
+                if df_final['data_sort'].isna().all():
+                    # Se falhou, tenta formato YYYY-MM-DD
+                    df_final['data_sort'] = pd.to_datetime(df_final['Data'], format='%Y-%m-%d', errors='coerce')
+            except:
+                df_final['data_sort'] = pd.to_datetime(df_final['Data'], errors='coerce')
+            
             # Extrai o horário inicial para ordenação (ex: "07:00-19:00" -> "07:00")
             df_final['horario_sort'] = df_final['Horário'].str.split('-').str[0].str.strip()
             df_final = df_final.sort_values(['data_sort', 'horario_sort'])
             df_final = df_final.drop(['data_sort', 'horario_sort'], axis=1)
         
+        # Remove a coluna temporária se existir
+        if 'data_temp' in df_final.columns:
+            df_final = df_final.drop('data_temp', axis=1)
+        
         return df_final
     except Exception as e:
         st.error(f"Erro ao buscar escala: {e}")
-        return pd.DataFrame(columns=['Tipo', 'Data', 'Horário', 'Vagas', 'Participantes'])
+        return pd.DataFrame(columns=['Tipo', 'Data', 'Horário', 'Vagas', 'Participantes', 'Observações'])
 
 
 def get_current_round(escala_nome):
@@ -495,11 +524,18 @@ def get_available_activities(escala_nome):
         atividades_disponiveis = atividades_escala[atividades_escala['vagas_disponiveis'] > 0].copy()
         
         # Ordena cronologicamente
-        atividades_disponiveis['data_sort'] = pd.to_datetime(atividades_disponiveis['data'])
+        atividades_disponiveis['data_sort'] = pd.to_datetime(atividades_disponiveis['data'], format='%d/%m/%Y', errors='coerce')
+        if atividades_disponiveis['data_sort'].isna().all():
+            # Se falhou, tenta formato YYYY-MM-DD
+            atividades_disponiveis['data_sort'] = pd.to_datetime(atividades_disponiveis['data'], format='%Y-%m-%d', errors='coerce')
         atividades_disponiveis['horario_sort'] = atividades_disponiveis['horario'].str.split('-').str[0].str.strip()
         atividades_disponiveis = atividades_disponiveis.sort_values(['data_sort', 'horario_sort'])
         
-        return atividades_disponiveis[['id_atividade', 'tipo', 'data', 'horario', 'vagas_disponiveis']]
+        # Inclui observações se disponível
+        if 'observacoes' in atividades_disponiveis.columns:
+            return atividades_disponiveis[['id_atividade', 'tipo', 'data', 'horario', 'vagas_disponiveis', 'observacoes']]
+        else:
+            return atividades_disponiveis[['id_atividade', 'tipo', 'data', 'horario', 'vagas_disponiveis']]
     except Exception as e:
         st.error(f"Erro ao buscar atividades disponíveis: {e}")
         return pd.DataFrame()
@@ -541,19 +577,29 @@ def dataframe_to_pdf(df):
     pdf.add_page()
     pdf.set_font("Arial", size=10)
     
-    # Cabeçalhos
-    col_widths = [30, 25, 30, 15, 80] # Ajuste as larguras das colunas
+    # Cabeçalhos - ajusta larguras dinamicamente baseado no número de colunas
+    num_cols = len(df.columns)
+    if num_cols == 6:
+        # Com Observações: Tipo, Data, Horário, Vagas, Participantes, Observações
+        col_widths = [25, 20, 25, 12, 60, 38]
+    else:
+        # Sem Observações
+        col_widths = [30, 25, 30, 15, 80]
+    
     for i, col in enumerate(df.columns):
-        pdf.cell(col_widths[i], 10, col, 1, 0, 'C')
+        if i < len(col_widths):
+            pdf.cell(col_widths[i], 10, col, 1, 0, 'C')
     pdf.ln()
     
     # Dados
     for index, row in df.iterrows():
         for i, item in enumerate(row):
-            pdf.multi_cell(col_widths[i], 10, str(item), 1, 'L')
+            if i < len(col_widths):
+                pdf.multi_cell(col_widths[i], 10, str(item), 1, 'L')
         pdf.ln()
     
-    return pdf.output(dest='S').encode('latin-1')
+    # fpdf2 now returns bytes directly without dest parameter
+    return pdf.output()
 
 def dataframe_to_excel(df):
     output = io.BytesIO()
@@ -712,9 +758,10 @@ else:
                 if 'df_new_activities' not in st.session_state:
                     st.session_state.df_new_activities = pd.DataFrame({
                         'Tipo': ['Plantão', 'Ambulatório', 'Enfermaria'],
-                        'Data': ['2025-12-01', '2025-12-02', '2025-12-03'],
+                        'Data': ['01/12/2025', '02/12/2025', '03/12/2025'],
                         'Horário': ['07:00-19:00', '08:00-12:00', '13:00-18:00'],
-                        'Vagas': [2, 1, 1]
+                        'Vagas': [2, 1, 1],
+                        'Observações': ['', '', '']
                     })
                 
                 # Editor de dados
@@ -728,7 +775,7 @@ else:
                             required=True
                         ),
                         "Data": st.column_config.TextColumn(
-                            "Data (AAAA-MM-DD)",
+                            "Data (dd/mm/AAAA)",
                             required=True
                         ),
                         "Horário": st.column_config.TextColumn(
@@ -739,6 +786,10 @@ else:
                             "Número de Vagas",
                             min_value=1,
                             required=True
+                        ),
+                        "Observações": st.column_config.TextColumn(
+                            "Observações",
+                            required=False
                         )
                     },
                     hide_index=True,
@@ -756,7 +807,7 @@ else:
                             if not edited_df.empty:
                                 # Converte para o formato esperado
                                 df_to_save = edited_df.copy()
-                                df_to_save.columns = ['tipo', 'data', 'horario', 'vagas']
+                                df_to_save.columns = ['tipo', 'data', 'horario', 'vagas', 'observacoes']
                                 
                                 # Salva as atividades
                                 success, message = add_atividades_bulk(escala_nome, df_to_save)
@@ -767,7 +818,8 @@ else:
                                         'Tipo': [''],
                                         'Data': [''],
                                         'Horário': [''],
-                                        'Vagas': [1]
+                                        'Vagas': [1],
+                                        'Observações': ['']
                                     })
                                     time.sleep(1)
                                     st.rerun()
@@ -784,7 +836,8 @@ else:
                             'Tipo': [''],
                             'Data': [''],
                             'Horário': [''],
-                            'Vagas': [1]
+                            'Vagas': [1],
+                            'Observações': ['']
                         })
                         st.rerun()
                 
@@ -941,8 +994,14 @@ else:
                         else:
                             # Prepara dados para exibição
                             df_display = df_available.copy()
-                            df_display.columns = ['ID', 'Tipo', 'Data', 'Horário', 'Vagas Disponíveis']
-                            df_display = df_display[['Tipo', 'Data', 'Horário', 'Vagas Disponíveis']]
+                            if len(df_display.columns) == 6:
+                                # Com observações
+                                df_display.columns = ['ID', 'Tipo', 'Data', 'Horário', 'Vagas Disponíveis', 'Observações']
+                                df_display = df_display[['Tipo', 'Data', 'Horário', 'Vagas Disponíveis', 'Observações']]
+                            else:
+                                # Sem observações
+                                df_display.columns = ['ID', 'Tipo', 'Data', 'Horário', 'Vagas Disponíveis']
+                                df_display = df_display[['Tipo', 'Data', 'Horário', 'Vagas Disponíveis']]
                             
                             st.dataframe(df_display, use_container_width=True)
                             
@@ -997,8 +1056,14 @@ else:
                             df_available = get_available_activities(escala_nome)
                             if not df_available.empty:
                                 df_display = df_available.copy()
-                                df_display.columns = ['ID', 'Tipo', 'Data', 'Horário', 'Vagas Disponíveis']
-                                df_display = df_display[['Tipo', 'Data', 'Horário', 'Vagas Disponíveis']]
+                                if len(df_display.columns) == 6:
+                                    # Com observações
+                                    df_display.columns = ['ID', 'Tipo', 'Data', 'Horário', 'Vagas Disponíveis', 'Observações']
+                                    df_display = df_display[['Tipo', 'Data', 'Horário', 'Vagas Disponíveis', 'Observações']]
+                                else:
+                                    # Sem observações
+                                    df_display.columns = ['ID', 'Tipo', 'Data', 'Horário', 'Vagas Disponíveis']
+                                    df_display = df_display[['Tipo', 'Data', 'Horário', 'Vagas Disponíveis']]
                                 st.dataframe(df_display, use_container_width=True)
 
         elif menu_user == "Minha Escala":
@@ -1029,14 +1094,26 @@ else:
                         )
                         
                         # Prepara dados para exibição
-                        df_display = minhas_atividades[['tipo', 'data', 'horario']].copy()
-                        df_display.columns = ['Tipo', 'Data', 'Horário']
+                        if 'observacoes' in minhas_atividades.columns:
+                            df_display = minhas_atividades[['tipo', 'data', 'horario', 'observacoes']].copy()
+                            df_display.columns = ['Tipo', 'Data', 'Horário', 'Observações']
+                        else:
+                            df_display = minhas_atividades[['tipo', 'data', 'horario']].copy()
+                            df_display.columns = ['Tipo', 'Data', 'Horário']
                         
                         # Ordena cronologicamente
-                        df_display['data_sort'] = pd.to_datetime(df_display['Data'])
+                        df_display['data_sort'] = pd.to_datetime(df_display['Data'], format='%d/%m/%Y', errors='coerce')
+                        if df_display['data_sort'].isna().all():
+                            # Se falhou, tenta formato YYYY-MM-DD
+                            df_display['data_sort'] = pd.to_datetime(df_display['Data'], format='%Y-%m-%d', errors='coerce')
                         df_display['horario_sort'] = df_display['Horário'].str.split('-').str[0].str.strip()
                         df_display = df_display.sort_values(['data_sort', 'horario_sort'])
-                        df_display = df_display[['Tipo', 'Data', 'Horário']]
+                        
+                        # Remove colunas de ordenação
+                        if 'observacoes' in minhas_atividades.columns:
+                            df_display = df_display[['Tipo', 'Data', 'Horário', 'Observações']]
+                        else:
+                            df_display = df_display[['Tipo', 'Data', 'Horário']]
                         
                         st.dataframe(df_display, use_container_width=True)
                         
